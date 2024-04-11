@@ -14,7 +14,7 @@ class SbMPC:
         self.horizon = config_mpc.horizon
         self.num_parallel_computations = config_mpc.num_parallel_computations
         self.sigma_mppi = config_mpc.sigma_mppi
-        
+
         self.dtype_general = config_general.dtype_general
 
         self.num_control_variables = model.nu * self.horizon
@@ -26,7 +26,7 @@ class SbMPC:
         self.jit_clip_input_vectorized = jax.jit(clip_input_vectorized, device=config_general.device)
 
         # Initialize the vector storing the current optimal input sequence
-        self.best_control_parameters = jnp.zeros((self.num_control_variables,), dtype=self.dtype_general)
+        self.best_control_vars = jnp.zeros((self.num_control_variables,), dtype=self.dtype_general)
 
         self.master_key = jax.random.PRNGKey(420)
         self.initial_random_parameters = jnp.zeros((self.num_parallel_computations, self.num_control_variables),
@@ -40,13 +40,13 @@ class SbMPC:
         initial_state = jnp.zeros((self.model.nx,), dtype=self.dtype_general)
         initial_reference = jnp.zeros((self.model.nx,), dtype=self.dtype_general)
 
-        control_parameters_vec = jax.random.uniform(self.master_key,
-                                                    (self.num_control_variables * self.num_parallel_computations,),
-                                                    minval=-100., maxval=100.)
+        control_vars_all = jax.random.uniform(self.master_key,
+                                              (self.num_control_variables * self.num_parallel_computations,),
+                                              minval=-100., maxval=100.)
         self.jit_vectorized_rollout(initial_state,
                                     initial_reference,
-                                    control_parameters_vec.reshape(self.num_parallel_computations,
-                                                                   self.num_control_variables))
+                                    control_vars_all.reshape(self.num_parallel_computations,
+                                                             self.num_control_variables))
 
         # Jit the controller function
         self.jit_compute_control_mppi = jax.jit(self.compute_control_mppi, device=config_general.device)
@@ -70,7 +70,7 @@ class SbMPC:
         def iterate_fun(iter, carry):
             cost, state, reference = carry
 
-            current_input = jax.lax.dynamic_slice_in_dim(control_variables, iter*self.model.nu, self.model.nu)
+            current_input = jax.lax.dynamic_slice_in_dim(control_variables, iter * self.model.nu, self.model.nu)
 
             running_cost = self.cost_fn(state, reference[:self.model.nx], current_input)
 
@@ -84,7 +84,7 @@ class SbMPC:
 
         return cost
 
-    def compute_control_mppi(self, state, reference, best_control_parameters, key):
+    def compute_control_mppi(self, state, reference, best_control_vars, key):
         """
         This function computes the control parameters by applying MPPI.
         """
@@ -97,12 +97,12 @@ class SbMPC:
         additional_random_parameters = additional_random_parameters.at[1:self.num_parallel_computations].set(
             self.sigma_mppi * jax.random.normal(key=key, shape=(num_sample_gaussian_1, self.num_control_variables)))
 
-        control_parameters_vec = self.jit_clip_input_vectorized(best_control_parameters + additional_random_parameters)
+        control_vars_all = self.jit_clip_input_vectorized(best_control_vars + additional_random_parameters)
 
-        additional_random_parameters_clipped = control_parameters_vec - best_control_parameters
+        additional_random_parameters_clipped = control_vars_all - best_control_vars
 
         # Do rollout
-        costs = self.jit_vectorized_rollout(state, reference, control_parameters_vec)
+        costs = self.jit_vectorized_rollout(state, reference, control_vars_all)
 
         # Saturate the cost in case of NaN or inf
         costs = jnp.where(jnp.isnan(costs), 1000000., costs)
@@ -120,19 +120,16 @@ class SbMPC:
         weights = exp_costs / denom
         weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * additional_random_parameters_clipped.reshape(
             (self.num_parallel_computations, self.num_control_variables, 1))
-        best_control_parameters += jnp.sum(weighted_inputs, axis=0).reshape((self.num_control_variables,))
+        best_control_vars += jnp.sum(weighted_inputs, axis=0).reshape((self.num_control_variables,))
 
-        return best_control_parameters, best_cost, costs
+        return best_control_vars, best_cost, costs
 
     def compute_control_action(self, state, reference):
-        best_control_parameters, best_cost, costs = self.jit_compute_control_mppi(state,
-                                                                                  reference,
-                                                                                  self.best_control_parameters,
-                                                                                  self.master_key)
+        best_control_vars, best_cost, costs = self.jit_compute_control_mppi(state,
+                                                                            reference,
+                                                                            self.best_control_vars,
+                                                                            self.master_key)
 
-        self.best_control_parameters = best_control_parameters
+        self.best_control_vars = best_control_vars
 
-        return best_control_parameters
-
-
-
+        return best_control_vars
