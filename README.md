@@ -1,2 +1,9 @@
-# sbmpc
-A generic sampling-based MPC python library based on jax
+# Sampling-Based MPC
+A generic sampling-based MPC python library based on jax.
+
+
+
+# TODO
+[] Control parametrization (splines etc)
+[] Control constraints
+[] Generic constraints
