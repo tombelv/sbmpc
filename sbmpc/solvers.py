@@ -1,4 +1,4 @@
-from sbmpc.model import ModelJax
+from sbmpc.model import Model
 from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
 
 import jax.numpy as jnp
@@ -6,7 +6,7 @@ import jax
 
 
 class SbMPC:
-    def __init__(self, model: ModelJax, cost_fn, config_mpc: ConfigMPC, config_general: ConfigGeneral):
+    def __init__(self, model: Model, cost_fn, config_mpc: ConfigMPC, config_general: ConfigGeneral):
         self.model = model
         self.cost_fn = cost_fn
 

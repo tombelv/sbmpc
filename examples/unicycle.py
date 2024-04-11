@@ -1,3 +1,5 @@
+import time
+
 import jax
 import jax.numpy as jnp
 from jax import random
@@ -33,37 +35,27 @@ class Simulation(simulation.Simulator):
 
     def update(self):
         x_des = jnp.array([0, 0, 0], dtype=jnp.float32)
+        
+        time_start = time.time_ns()
         input_sequence = self.controller.compute_control_action(self.current_state, x_des)
-
-        input = input_sequence[:self.model.nu]
-        print("input:", input)
-        self.input_traj[self.iter, :] = input
-        self.current_state = self.model.integrate(self.current_state, input, self.controller.dt)
+        print("computation time [ms]: ", 1e-6*(time.time_ns() - time_start))
+        
+        ctrl = input_sequence[:self.model.nu]
+        self.input_traj[self.iter, :] = ctrl
+        self.current_state = self.model.integrate(self.current_state, ctrl, self.controller.dt)
 
     def post_update(self):
         self.state_traj[self.iter, :] = self.current_state
-        print("state:", self.current_state)
-
 
 if __name__ == "__main__":
-
-    device = jax.devices("gpu")[0]
 
     system = Unicycle(3, 2)
 
     x = jnp.array([2, 2, 0], dtype=jnp.float32)
     u = jnp.array([1, 0], dtype=jnp.float32)
 
-
-    # key = random.PRNGKey(42)
-    # input_vec = random.randint(key, (system.nu * 10,), minval=-2, maxval=2).reshape(10, system.nu)
-    #
-    # for _ in range(10):
-    #     x = system.integrate_vectorized(x, u, 0.05)
-    #     print(x)
-
-    mpc_config = ConfigMPC(0.01, 20, 2, num_parallel_computations=10000)
-    gen_config = ConfigGeneral("float32", device)
+    mpc_config = ConfigMPC(0.01, 20, 1, num_parallel_computations=5000)
+    gen_config = ConfigGeneral("float32", jax.devices("gpu")[0])
 
     solver = SbMPC(system, cost_fn, mpc_config, gen_config)
 
@@ -73,6 +65,9 @@ if __name__ == "__main__":
 
     # Plot x-y position of the robot
     plt.plot(sim.state_traj[:, 0], sim.state_traj[:, 1])
+    plt.show()
+
+    plt.plot(sim.input_traj)
     plt.show()
 
 
