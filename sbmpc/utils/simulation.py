@@ -1,4 +1,4 @@
-
+import numpy as np
 
 class Simulator:
     def __init__(self, initial_state, model, controller, num_iterations=100):
@@ -7,6 +7,9 @@ class Simulator:
         self.model = model
         self.controller = controller
         self.num_iterations = num_iterations
+
+        self.state_traj = np.zeros((self.num_iterations, model.nx))
+        self.input_traj = np.zeros((self.num_iterations, model.nu))
 
     def pre_update(self):
         pass

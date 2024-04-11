@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import jax
 
 
-class SbcMPC:
+class SbMPC:
     def __init__(self, model: ModelJax, cost_fn, config_mpc: ConfigMPC, config_general: ConfigGeneral):
         self.model = model
         self.cost_fn = cost_fn
@@ -63,10 +63,10 @@ class SbcMPC:
 
             current_input = jax.lax.dynamic_slice_in_dim(control_variables, iter*self.model.nu, self.model.nu)
 
+            running_cost = self.cost_fn(state, reference[:self.model.nx], current_input)
+
             # Integrate the dynamics
             state_next = self.model.integrate(state, current_input, self.dt)
-
-            running_cost = self.cost_fn(state, reference[:self.model.nx], current_input)
 
             return cost + running_cost, state_next, reference
 
@@ -79,7 +79,6 @@ class SbcMPC:
         """
         This function computes the control parameters by applying MPPI.
         """
-
         # Generate random parameters
         # The first control parameters is the old best one, so we add zero noise there
         additional_random_parameters = self.initial_random_parameters * 0.0
@@ -100,22 +99,29 @@ class SbcMPC:
 
         # Take the best found control parameters
         best_index = jnp.nanargmin(costs)
-        print("best index:", best_index)
         best_cost = costs.take(best_index)
 
         # # Compute MPPI update
-        # beta = best_cost
-        # temperature = 1.
-        # exp_costs = jnp.exp((-1. / temperature) * (costs - beta))
-        # denom = jnp.sum(exp_costs)
-        # weights = exp_costs / denom
-        # weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * additional_random_parameters.reshape(
-        #     (self.num_parallel_computations, self.num_control_variables, 1))
-        # self.best_control_parameters += jnp.sum(weighted_inputs, axis=0).reshape((self.num_control_variables,))
+        beta = best_cost
+        temperature = 1.
+        exp_costs = jnp.exp((-1. / temperature) * (costs - beta))
+        denom = jnp.sum(exp_costs)
+        weights = exp_costs / denom
+        weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * additional_random_parameters.reshape(
+            (self.num_parallel_computations, self.num_control_variables, 1))
+        best_control_parameters += jnp.sum(weighted_inputs, axis=0).reshape((self.num_control_variables,))
 
-        self.best_control_parameters = control_parameters_vec[best_index]
+        return best_control_parameters, best_cost, costs
 
-        return self.best_control_parameters, best_cost, costs
+    def compute_control_action(self, state, reference):
+        best_control_parameters, best_cost, costs = self.jit_compute_control_mppi(state,
+                                                                                  reference,
+                                                                                  self.best_control_parameters,
+                                                                                  self.master_key)
+
+        self.best_control_parameters = best_control_parameters
+
+        return best_control_parameters
 
 
 

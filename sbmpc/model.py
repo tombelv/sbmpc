@@ -13,8 +13,13 @@ class Model:
         raise NotImplementedError
 
     def integrate(self, state, inputs, dt: float):
-        """ One-step integration of the dynamics using Euler method"""
-        return state + dt * self.dynamics(state, inputs)
+        """ One-step integration of the dynamics using Rk4 method"""
+        k1 = self.dynamics(state, inputs)
+        k2 = self.dynamics(state + k1*dt/2.0, inputs)
+        k3 = self.dynamics(state + k2 * dt / 2.0, inputs)
+        k4 = self.dynamics(state + k3 * dt, inputs)
+        return state + (dt/6.) * (k1 + 2 * k2 + 2 * k3 + k4)
+
 
 
 class ModelJax(Model):
