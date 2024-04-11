@@ -19,6 +19,12 @@ class SbMPC:
 
         self.num_control_variables = model.nu * self.horizon
 
+        self.input_max_full_horizon = jnp.repeat(model.input_max, self.horizon)
+        self.input_min_full_horizon = jnp.repeat(model.input_min, self.horizon)
+
+        clip_input_vectorized = jax.vmap(self.clip_input, in_axes=0, out_axes=0)
+        self.jit_clip_input_vectorized = jax.jit(clip_input_vectorized, device=config_general.device)
+
         # Initialize the vector storing the current optimal input sequence
         self.best_control_parameters = jnp.zeros((self.num_control_variables,), dtype=self.dtype_general)
 
@@ -44,6 +50,9 @@ class SbMPC:
 
         # Jit the controller function
         self.jit_compute_control_mppi = jax.jit(self.compute_control_mppi, device=config_general.device)
+
+    def clip_input(self, control_variables):
+        return jnp.clip(control_variables, self.input_min_full_horizon, self.input_max_full_horizon)
 
     def compute_rollout(self, initial_state, reference, control_variables):
         """Calculate cost of a rollout of the dynamics given random control variables.
@@ -88,7 +97,9 @@ class SbMPC:
         additional_random_parameters = additional_random_parameters.at[1:self.num_parallel_computations].set(
             self.sigma_mppi * jax.random.normal(key=key, shape=(num_sample_gaussian_1, self.num_control_variables)))
 
-        control_parameters_vec = best_control_parameters + additional_random_parameters
+        control_parameters_vec = self.jit_clip_input_vectorized(best_control_parameters + additional_random_parameters)
+
+        additional_random_parameters_clipped = control_parameters_vec - best_control_parameters
 
         # Do rollout
         costs = self.jit_vectorized_rollout(state, reference, control_parameters_vec)
@@ -107,7 +118,7 @@ class SbMPC:
         exp_costs = jnp.exp((-1. / temperature) * (costs - beta))
         denom = jnp.sum(exp_costs)
         weights = exp_costs / denom
-        weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * additional_random_parameters.reshape(
+        weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * additional_random_parameters_clipped.reshape(
             (self.num_parallel_computations, self.num_control_variables, 1))
         best_control_parameters += jnp.sum(weighted_inputs, axis=0).reshape((self.num_control_variables,))
 

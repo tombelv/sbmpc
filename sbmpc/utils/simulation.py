@@ -1,15 +1,16 @@
 import numpy as np
 
 class Simulator:
-    def __init__(self, initial_state, model, controller, num_iterations=100):
+    def __init__(self, initial_state, model, controller, num_iter=100):
         self.iter = 0
         self.current_state = initial_state
         self.model = model
         self.controller = controller
-        self.num_iterations = num_iterations
+        self.num_iter = num_iter
 
-        self.state_traj = np.zeros((self.num_iterations, model.nx))
-        self.input_traj = np.zeros((self.num_iterations, model.nu))
+        self.state_traj = np.zeros((self.num_iter + 1, model.nx))
+        self.state_traj[0, :] = self.current_state
+        self.input_traj = np.zeros((self.num_iter, model.nu))
 
     def pre_update(self):
         pass
@@ -21,7 +22,7 @@ class Simulator:
         pass
 
     def simulate(self):
-        while self.iter < self.num_iterations:
+        while self.iter < self.num_iter:
             self.step()
 
     def step(self):

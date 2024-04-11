@@ -16,12 +16,15 @@ class Unicycle(Model):
     """ Kinematic model of a unicycle robot controlled with driving and steering velocities"""
     def __init__(self, nx: int, nu: int):
         super().__init__(nx, nu)
+        self.input_max = jnp.array([2, 4])
+        self.input_min = -self.input_max
 
     def dynamics(self, state: jnp.array, inputs: jnp.array) -> jnp.array:
         state_dot = jnp.array([inputs[0]*jnp.cos(state[2]),
                                inputs[0]*jnp.sin(state[2]),
                                inputs[1]], dtype=jnp.float32)
         return state_dot
+
 
 
 def cost_fn(state: jnp.array, state_ref: jnp.array, inputs: jnp.array) -> jnp.float32:
@@ -45,7 +48,8 @@ class Simulation(simulation.Simulator):
         self.current_state = self.model.integrate(self.current_state, ctrl, self.controller.dt)
 
     def post_update(self):
-        self.state_traj[self.iter, :] = self.current_state
+        self.state_traj[self.iter + 1, :] = self.current_state
+
 
 if __name__ == "__main__":
 
@@ -54,12 +58,12 @@ if __name__ == "__main__":
     x = jnp.array([2, 2, 0], dtype=jnp.float32)
     u = jnp.array([1, 0], dtype=jnp.float32)
 
-    mpc_config = ConfigMPC(0.01, 20, 1, num_parallel_computations=5000)
+    mpc_config = ConfigMPC(0.02, 50, 0.1, num_parallel_computations=5000)
     gen_config = ConfigGeneral("float32", jax.devices("gpu")[0])
 
     solver = SbMPC(system, cost_fn, mpc_config, gen_config)
 
-    sim = Simulation(x, system, solver, 1000)
+    sim = Simulation(x, system, solver, 600)
 
     sim.simulate()
 
