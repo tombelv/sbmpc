@@ -12,13 +12,7 @@ class Simulator:
         self.state_traj[0, :] = self.current_state
         self.input_traj = np.zeros((self.num_iter, model.nu))
 
-    def pre_update(self):
-        pass
-
     def update(self):
-        pass
-
-    def post_update(self):
         pass
 
     def simulate(self):
@@ -26,9 +20,7 @@ class Simulator:
             self.step()
 
     def step(self):
-        self.pre_update()
         self.update()
-        self.post_update()
         self.iter += 1
 
 
