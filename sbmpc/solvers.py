@@ -35,21 +35,15 @@ class SbMPC:
         self.vectorized_rollout = jax.vmap(self.compute_rollout, in_axes=(None, None, 0), out_axes=0)
         self.jit_vectorized_rollout = jax.jit(self.vectorized_rollout, device=config_general.device)
 
+        # Jit the controller function
+        self.jit_compute_control_mppi = jax.jit(self.compute_control_mppi, device=config_general.device)
+
         # the first call of jax is very slow, hence we should do this since the beginning
         # creating a fake initial state, reference and contact sequence
         initial_state = jnp.zeros((self.model.nx,), dtype=self.dtype_general)
         initial_reference = jnp.zeros((self.model.nx,), dtype=self.dtype_general)
 
-        control_vars_all = jax.random.uniform(self.master_key,
-                                              (self.num_control_variables * self.num_parallel_computations,),
-                                              minval=-100., maxval=100.)
-        self.jit_vectorized_rollout(initial_state,
-                                    initial_reference,
-                                    control_vars_all.reshape(self.num_parallel_computations,
-                                                             self.num_control_variables))
-
-        # Jit the controller function
-        self.jit_compute_control_mppi = jax.jit(self.compute_control_mppi, device=config_general.device)
+        self.jit_compute_control_mppi(initial_state, initial_reference, self.best_control_vars, self.master_key)
 
     def clip_input(self, control_variables):
         return jnp.clip(control_variables, self.input_min_full_horizon, self.input_max_full_horizon)

@@ -5,13 +5,13 @@ import jax.numpy as jnp
 
 import matplotlib.pyplot as plt
 
-from sbmpc.model import Model
+from sbmpc.model import Model, ModelJax
 from sbmpc.solvers import SbMPC
 from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
 import sbmpc.utils.simulation as simulation
 
 
-class Unicycle(Model):
+class Unicycle(ModelJax):
     """ Kinematic model of a unicycle robot controlled with driving and steering velocities"""
     def __init__(self, nx: int, nu: int):
         super().__init__(nx, nu)
@@ -39,13 +39,14 @@ class Simulation(simulation.Simulator):
         x_des = jnp.array([0, 0, 0], dtype=jnp.float32)
         # Compute the optimal input sequence
         time_start = time.time_ns()
-        input_sequence = self.controller.compute_control_action(self.current_state, x_des)
-        print("computation time: {:.3f} [ms]".format(1e-6*(time.time_ns() - time_start)))
+        input_sequence = self.controller.compute_control_action(self.current_state, x_des).block_until_ready()
+        print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
         ctrl = input_sequence[:self.model.nu]
+
         self.input_traj[self.iter, :] = ctrl
 
         # Simulate the dynamics
-        self.current_state = self.model.integrate(self.current_state, ctrl, self.controller.dt)
+        self.current_state = self.model.integrate_jit(self.current_state, ctrl, self.controller.dt)
         self.state_traj[self.iter + 1, :] = self.current_state
 
 
@@ -54,6 +55,9 @@ if __name__ == "__main__":
     system = Unicycle(3, 2)
 
     x_init = jnp.array([2, 2, 0], dtype=jnp.float32)
+
+    # dummy integration
+    system.integrate_jit(x_init, jnp.zeros(2), 0.0)
 
     mpc_config = ConfigMPC(0.02, 50, 0.1, num_parallel_computations=5000)
     gen_config = ConfigGeneral("float32", jax.devices("gpu")[0])

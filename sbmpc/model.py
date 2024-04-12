@@ -22,19 +22,21 @@ class Model:
         return state + (dt/6.) * (k1 + 2. * k2 + 2. * k3 + k4)
 
 
-
-
-
 class ModelJax(Model):
     def __init__(self, nx: int, nu: int, device: jax.Device = jax.devices('cpu')[0], dtype_general="float32"):
         super().__init__(nx, nu)
         self.device = device
         self.dtype_general = dtype_general
 
-        vectorized_integrate_jax = jax.vmap(self.integrate, in_axes=(0, 0, None), out_axes=0)
-        self.integrate_vectorized = jax.jit(vectorized_integrate_jax, device=self.device)
+        # vectorized_integrate_jax = jax.vmap(self.integrate, in_axes=(0, 0, None), out_axes=0)
+        # self.integrate_vectorized = jax.jit(vectorized_integrate_jax, device=self.device)
 
-        self.jit_limit_inputs = jax.jit(self.limit_inputs, device=self.device)
+        self.integrate_jit = jax.jit(self.integrate, device=jax.devices('cpu')[0])
+
+        # Make one dummy integration to compile during construction
+        zero_state = jnp.zeros(nx, dtype=dtype_general)
+        zero_ctrl = jnp.zeros(nu, dtype=dtype_general)
+        self.integrate_jit(zero_state, zero_ctrl, 0.0)
 
 
 
