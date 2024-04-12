@@ -63,23 +63,19 @@ class SbMPC:
         Returns:
             (float): cost of the rollout
         """
+        def iterate_fun(idx, carry):
+            sum_cost, curr_state, reference = carry
 
-        state = initial_state
-        cost = jnp.float32(0.0)
+            current_input = jax.lax.dynamic_slice_in_dim(control_variables, idx * self.model.nu, self.model.nu)
 
-        def iterate_fun(iter, carry):
-            cost, state, reference = carry
-
-            current_input = jax.lax.dynamic_slice_in_dim(control_variables, iter * self.model.nu, self.model.nu)
-
-            running_cost = self.cost_fn(state, reference[:self.model.nx], current_input)
+            running_cost = self.cost_fn(curr_state, reference[:self.model.nx], current_input)
 
             # Integrate the dynamics
-            state_next = self.model.integrate(state, current_input, self.dt)
+            state_next = self.model.integrate(curr_state, current_input, self.dt)
 
-            return cost + running_cost, state_next, reference
+            return sum_cost + running_cost, state_next, reference
 
-        carry = (cost, state, reference)
+        carry = (jnp.float32(0.0), initial_state, reference)
         cost, state, reference = jax.lax.fori_loop(0, self.horizon, iterate_fun, carry)
 
         return cost

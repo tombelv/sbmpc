@@ -4,6 +4,6 @@ A generic sampling-based MPC python library based on jax.
 
 
 # TODO
-[] Control parametrization (splines etc)
+[ ] Control parametrization (splines etc)
 
-[] Generic constraints
+[ ] Generic constraints
