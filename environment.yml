@@ -1,0 +1,20 @@
+name: sbsmpc
+channels:
+- conda-forge
+- nvidia
+dependencies:
+- python
+- numpy
+- matplotlib
+- jaxlib=*=*cuda*
+- jax
+- cuda-nvcc 
+- pinocchio  
+- scipy 
+- compilers 
+- cmake 
+- pkg-config 
+- make 
+- ninja 
+- pip:
+  - mujoco
