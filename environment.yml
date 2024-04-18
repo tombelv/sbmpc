@@ -17,4 +17,4 @@ dependencies:
 - make 
 - ninja 
 - pip:
-  - mujoco
+  - mujoco-mjx

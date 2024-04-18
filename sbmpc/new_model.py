@@ -14,12 +14,12 @@ class BaseModel(ABC):
         pass
 
 class Model(BaseModel):
-    def __init__(self, nq: int,nv: int, nu: int,input_max, model_dynamics=None):
-        self.nq=nq                        # number of generalized coordinates = dim(qpos)
-        self.nv=nv                        # number of degrees of freedom = dim(qvel)
-        self.nu=nu                        # number of control inputs
-        self.input_max =input_max
-        self.input_min = -self.input_max
+    def __init__(self,  model_dynamics, nq: int, nv: int, nu: int, input_bounds=(None, None)):
+        self.nq = nq                        # number of generalized coordinates = dim(qpos)
+        self.nv = nv                        # number of degrees of freedom = dim(qvel)
+        self.nu = nu                        # number of control inputs
+        self.input_min = input_bounds[0]
+        self.input_max = input_bounds[1]
         self.state0 = jnp.zeros(nq+nv, dtype=jnp.float32) # initstate
         self.model_dynamics = model_dynamics
 
@@ -39,15 +39,15 @@ class Model(BaseModel):
         return state + (dt/6.) * (k1 + 2. * k2 + 2. * k3 + k4)
 
 class ModelMjx(BaseModel):
-    def __init__(self, model_path, input_max):
+    def __init__(self, model_path, input_bounds=(None, None)):
         self.model_path = model_path
         # Load the MuJoCo model
         mj_model = mujoco.MjModel.from_xml_path(self.model_path)
-        self.nq=mj_model.nq                        # number of generalized coordinates = dim(qpos)
-        self.nv=mj_model.nv                        # number of degrees of freedom = dim(qvel)
-        self.nu=mj_model.nu                        # number of control inputs
-        self.input_max =input_max
-        self.input_min = -self.input_max
+        self.nq = mj_model.nq                        # number of generalized coordinates = dim(qpos)
+        self.nv = mj_model.nv                        # number of degrees of freedom = dim(qvel)
+        self.nu = mj_model.nu                        # number of control inputs
+        self.input_min = input_bounds[0]
+        self.input_max = input_bounds[1]
         mj_data = mujoco.MjData(mj_model)
         self.renderer = mujoco.Renderer(mj_model)
         self.mjx_model = mjx.put_model(mj_model)
@@ -57,15 +57,16 @@ class ModelMjx(BaseModel):
         pass
 
     # here we need to work on data that are already on the gpu
-    def integrate(self, state: mjx.MjData , inputs: jnp.array, dt: float):
+    def integrate(self, state: mujoco.MjData , inputs: jnp.array, dt: float):
         # here im applyng the control we need to check
         # TODO check how to change the control interface using mjx
         state.ctrl = inputs 
         mjx_data = mjx.step(self.mjx_model, state)
         return mjx_data
 
+
 class ModelJax:
-    def __init__(self,  other_model: BaseModel, device: jax.Device = jax.devices('cpu')[0], dtype_general="float32"):
+    def __init__(self,  other_model: Model, device: jax.Device = jax.devices('cpu')[0], dtype_general="float32"):
         self.model = other_model
         self.device = device
         self.dtype_general = dtype_general

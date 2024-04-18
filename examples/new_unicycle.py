@@ -11,12 +11,11 @@ from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
 import sbmpc.utils.simulation as simulation
 
 
-
-
 input_max = jnp.array([2, 4])
 input_min = -input_max
 
-def unicycle_dynamics(self, state: jnp.array, inputs: jnp.array) -> jnp.array:
+
+def unicycle_dynamics(state: jnp.array, inputs: jnp.array) -> jnp.array:
     state_dot = jnp.array([inputs[0]*jnp.cos(state[2]),
                             inputs[0]*jnp.sin(state[2]),
                             inputs[1]], dtype=jnp.float32)
@@ -50,7 +49,7 @@ class Simulation(simulation.Simulator):
 
 if __name__ == "__main__":
 
-    system = Model(3, 3, 2, unicycle_dynamics) 
+    system = Model(unicycle_dynamics, 3, 0, 2, [input_min, input_max])
     jit_system = ModelJax(system, jax.devices('gpu')[0], "float32")
 
     x_init = jnp.array([2, 2, 0], dtype=jnp.float32)
