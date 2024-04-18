@@ -13,7 +13,7 @@ import sbmpc.utils.simulation as simulation
 input_max = jnp.array([2, 4])
 input_min = -input_max
 
-
+@jax.jit
 def unicycle_dynamics(state: jnp.array, inputs: jnp.array) -> jnp.array:
     state_dot = jnp.array([inputs[0] * jnp.cos(state[2]),
                            inputs[0] * jnp.sin(state[2]),
