@@ -1,14 +1,14 @@
 import time
+import os
 
 import jax
 import jax.numpy as jnp
-
 import matplotlib.pyplot as plt
 
-from sbmpc.model import Model, ModelJax
+import sbmpc.utils.simulation as simulation
+from sbmpc.model import ModelJax
 from sbmpc.solvers import SbMPC
 from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
-import sbmpc.utils.simulation as simulation
 
 
 class Unicycle(ModelJax):
@@ -52,12 +52,18 @@ class Simulation(simulation.Simulator):
 
 if __name__ == "__main__":
 
+    # TODO: test if these flags lead to any speedup
+    # os.environ['XLA_FLAGS'] = (
+    #     '--xla_gpu_enable_triton_softmax_fusion=true '
+    #     '--xla_gpu_triton_gemm_any=True '
+    #     '--xla_gpu_enable_async_collectives=true '
+    #     '--xla_gpu_enable_latency_hiding_scheduler=true '
+    #     '--xla_gpu_enable_highest_priority_async_stream=true '
+    # )
+
     system = Unicycle(3, 2)
 
     x_init = jnp.array([2, 2, 0], dtype=jnp.float32)
-
-    # dummy integration
-    system.integrate_jit(x_init, jnp.zeros(2), 0.0)
 
     mpc_config = ConfigMPC(0.02, 50, 0.1, num_parallel_computations=5000)
     gen_config = ConfigGeneral("float32", jax.devices("gpu")[0])
