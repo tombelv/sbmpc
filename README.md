@@ -3,8 +3,8 @@ A generic sampling-based MPC python library based on jax.
 
 # Installation
 ## Requirements
- - Nvidia cuda toolkit installed system-wide
- - conda
+ - [Nvidia cuda toolkit](https://developer.nvidia.com/cuda-toolkit) installed system-wide
+ - [miniforge](https://github.com/conda-forge/miniforge/releases)
 
 ## Instructions
 Create the conda environment with
