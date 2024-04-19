@@ -57,7 +57,7 @@ class ModelMjx(BaseModel):
 
         super().__init__(mj_model.nq, mj_model.nv, mj_model.nu, input_bounds)
         mj_data = mujoco.MjData(mj_model)
-        self.renderer = mujoco.Renderer(mj_model)
+        # self.renderer = mujoco.Renderer(mj_model)
         self.mjx_model = mjx.put_model(mj_model)
         self.state0 = mjx.put_data(mj_model, mj_data)  # initial state on the gpu
 
