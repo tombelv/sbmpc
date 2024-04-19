@@ -47,10 +47,12 @@ class Model(BaseModel):
 
 
 class ModelMjx(BaseModel):
-    def __init__(self, model_path, input_bounds=(None, None)):
+    def __init__(self, model_path):
         self.model_path = model_path
         # Load the MuJoCo model
         mj_model = mujoco.MjModel.from_xml_path(self.model_path)
+
+        input_bounds = (None, None)  # We should take input bounds from the model
 
         super().__init__(mj_model.nq, mj_model.nv, mj_model.nu, input_bounds)
         mj_data = mujoco.MjData(mj_model)
@@ -62,7 +64,7 @@ class ModelMjx(BaseModel):
         pass
 
     # here we need to work on data that are already on the gpu
-    def integrate(self, state: mujoco.MjData , inputs: jnp.array, dt: float):
+    def integrate(self, state: mujoco.MjData, inputs: jnp.array, dt: float):
         # here im applyng the control we need to check
         # TODO check how to change the control interface using mjx
         state.ctrl = inputs 
