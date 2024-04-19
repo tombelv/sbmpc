@@ -1,4 +1,4 @@
-from sbmpc.model import Model
+from sbmpc.new_model import BaseModel
 from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
 
 import jax.numpy as jnp
@@ -6,7 +6,7 @@ import jax
 
 
 class SbMPC:
-    def __init__(self, model: Model, cost_fn, config_mpc: ConfigMPC, config_general: ConfigGeneral):
+    def __init__(self, model: BaseModel, cost_fn, config_mpc: ConfigMPC, config_general: ConfigGeneral):
         self.model = model
         self.cost_fn = cost_fn
 
@@ -23,7 +23,7 @@ class SbMPC:
         self.input_min_full_horizon = jnp.repeat(model.input_min, self.horizon)
 
         clip_input_vectorized = jax.vmap(self.clip_input, in_axes=0, out_axes=0)
-        self.jit_clip_input_vectorized = jax.jit(clip_input_vectorized, device=config_general.device)
+        self.clip_input = jax.jit(clip_input_vectorized, device=config_general.device)
 
         # Initialize the vector storing the current optimal input sequence
         self.best_control_vars = jnp.zeros((self.num_control_variables,), dtype=self.dtype_general)
@@ -87,7 +87,7 @@ class SbMPC:
         additional_random_parameters = additional_random_parameters.at[1:self.num_parallel_computations].set(
             self.sigma_mppi * jax.random.normal(key=key, shape=(num_sample_gaussian_1, self.num_control_variables)))
 
-        control_vars_all = self.jit_clip_input_vectorized(best_control_vars + additional_random_parameters)
+        control_vars_all = self.clip_input(best_control_vars + additional_random_parameters)
 
         additional_random_parameters_clipped = control_vars_all - best_control_vars
 
