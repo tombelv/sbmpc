@@ -6,13 +6,13 @@ from mujoco import mjx
 
 
 class BaseModel(ABC):
-    def __init__(self, nq: int, nv: int, nu: int, input_bounds=(None, None)):
+    def __init__(self, nq: int, nv: int, nu: int, input_bounds=(-jnp.inf, jnp.inf)):
         self.nq = nq  # number of generalized coordinates = dim(qpos)
         self.nv = nv  # number of degrees of freedom = dim(qvel)
         self.nx = nq + nv
         self.nu = nu  # number of control inputs
-        self.input_min = input_bounds[0]
-        self.input_max = input_bounds[1]
+        self.input_min = input_bounds[0]*jnp.ones(self.nu, dtype=jnp.float32)
+        self.input_max = input_bounds[1]*jnp.ones(self.nu, dtype=jnp.float32)
 
     @abstractmethod
     def integrate(self, state, inputs, dt: float):
@@ -24,7 +24,7 @@ class BaseModel(ABC):
 
 
 class Model(BaseModel):
-    def __init__(self, model_dynamics, nq: int, nv: int, nu: int, input_bounds=(None, None)):
+    def __init__(self, model_dynamics, nq: int, nv: int, nu: int, input_bounds=(-jnp.inf, jnp.inf)):
         super().__init__(nq, nv, nu, input_bounds)
 
         self.state0 = jnp.zeros(self.nx, dtype=jnp.float32) # initstate
@@ -52,7 +52,8 @@ class ModelMjx(BaseModel):
         # Load the MuJoCo model
         mj_model = mujoco.MjModel.from_xml_path(self.model_path)
 
-        input_bounds = (None, None)  # We should take input bounds from the model
+        input_bounds = (-jnp.inf*jnp.ones(mj_model.nu, dtype=jnp.float32),
+                        jnp.inf*jnp.ones(mj_model.nu, dtype=jnp.float32))  # We should take input bounds from the model
 
         super().__init__(mj_model.nq, mj_model.nv, mj_model.nu, input_bounds)
         mj_data = mujoco.MjData(mj_model)
