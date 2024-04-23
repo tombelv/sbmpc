@@ -6,7 +6,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
 from sbmpc.model import Model
-from sbmpc.solvers import SbMPC
+from sbmpc.solvers import SbMPC, BaseObjective
 from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
 import sbmpc.utils.simulation as simulation
 
@@ -22,10 +22,11 @@ def unicycle_dynamics(state: jnp.array, inputs: jnp.array) -> jnp.array:
     return state_dot
 
 
-def cost_fn(state: jnp.array, state_ref: jnp.array, inputs: jnp.array) -> jnp.float32:
-    """ Cost function to regulate the state to the desired value"""
-    error = state - state_ref
-    return 50 * jnp.linalg.norm(error, ord=2) + jnp.linalg.norm(inputs, ord=2)
+class Objective(BaseObjective):
+    def running_cost(self, state: jnp.array, state_ref: jnp.array, inputs: jnp.array) -> jnp.float32:
+        """ Cost function to regulate the state to the desired value"""
+        error = state - state_ref
+        return 50 * jnp.linalg.norm(error, ord=2) + jnp.linalg.norm(inputs, ord=2)
 
 
 class Simulation(simulation.Simulator):
@@ -56,7 +57,7 @@ if __name__ == "__main__":
     mpc_config = ConfigMPC(0.02, 50, 0.1, num_parallel_computations=5000)
     gen_config = ConfigGeneral("float32", jax.devices("gpu")[0])
 
-    solver = SbMPC(system, cost_fn, mpc_config, gen_config)
+    solver = SbMPC(system, Objective(), mpc_config, gen_config)
 
     # Setup and run the simulation
     sim = Simulation(x_init, system, solver, 600)

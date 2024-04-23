@@ -4,11 +4,21 @@ from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
 import jax.numpy as jnp
 import jax
 
+from abc import ABC, abstractmethod
+
+
+class BaseObjective(ABC):
+    @abstractmethod
+    def running_cost(self, state, reference, inputs):
+        pass
+
+    def final_cost(self, state, reference):
+        return 0.0
 
 class SbMPC:
-    def __init__(self, model: BaseModel, cost_fn, config_mpc: ConfigMPC, config_general: ConfigGeneral):
+    def __init__(self, model: BaseModel, objective: BaseObjective, config_mpc: ConfigMPC, config_general: ConfigGeneral, initial_guess=None):
         self.model = model
-        self.cost_fn = cost_fn
+        self.objective = objective
 
         self.dt = config_mpc.dt
         self.horizon = config_mpc.horizon
@@ -25,12 +35,15 @@ class SbMPC:
         clip_input_vectorized = jax.vmap(self.clip_input, in_axes=0, out_axes=0)
         self.clip_input = jax.jit(clip_input_vectorized, device=config_general.device)
 
-        # Initialize the vector storing the current optimal input sequence
-        self.best_control_vars = jnp.zeros((self.num_control_variables,), dtype=self.dtype_general)
-
         self.master_key = jax.random.PRNGKey(420)
         self.initial_random_parameters = jnp.zeros((self.num_parallel_computations, self.num_control_variables),
                                                    dtype=self.dtype_general)
+
+        # Initialize the vector storing the current optimal input sequence
+        if initial_guess is None:
+            self.best_control_vars = jnp.zeros((self.num_control_variables,), dtype=self.dtype_general)
+        else:
+            self.best_control_vars = jnp.tile(initial_guess, self.horizon)
 
         self.vectorized_rollout = jax.vmap(self.compute_rollout, in_axes=(None, None, 0), out_axes=0)
         self.jit_vectorized_rollout = jax.jit(self.vectorized_rollout, device=config_general.device)
@@ -62,7 +75,7 @@ class SbMPC:
 
             current_input = jax.lax.dynamic_slice_in_dim(control_variables, idx * self.model.nu, self.model.nu)
 
-            running_cost = self.cost_fn(curr_state, reference[:self.model.nx], current_input)
+            running_cost = self.objective.running_cost(curr_state, reference, current_input)
 
             # Integrate the dynamics
             state_next = self.model.integrate(curr_state, current_input, self.dt)
@@ -71,6 +84,8 @@ class SbMPC:
 
         carry = (jnp.float32(0.0), initial_state, reference)
         cost, state, reference = jax.lax.fori_loop(0, self.horizon, iterate_fun, carry)
+
+        cost = cost + self.objective.final_cost(state, reference)
 
         return cost
 
