@@ -19,8 +19,8 @@ class SbMPC:
 
         self.num_control_variables = model.nu * self.horizon
 
-        self.input_max_full_horizon = jnp.repeat(model.input_max, self.horizon)
-        self.input_min_full_horizon = jnp.repeat(model.input_min, self.horizon)
+        self.input_max_full_horizon = jnp.tile(model.input_max, self.horizon)
+        self.input_min_full_horizon = jnp.tile(model.input_min, self.horizon)
 
         clip_input_vectorized = jax.vmap(self.clip_input, in_axes=0, out_axes=0)
         self.clip_input = jax.jit(clip_input_vectorized, device=config_general.device)
