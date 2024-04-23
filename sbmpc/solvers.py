@@ -1,4 +1,4 @@
-from sbmpc.new_model import BaseModel
+from sbmpc.model import BaseModel
 from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
 
 import jax.numpy as jnp
