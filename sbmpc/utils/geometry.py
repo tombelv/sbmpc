@@ -27,3 +27,9 @@ def quat_product(quat1, quat2):
     return jnp.concatenate([jnp.array([quat1[0] * quat2[0] - vec1.dot(vec2)]),
                             quat1[0] * vec2 + quat2[0]*vec1 + skew(vec1) @ vec2])
 
+
+@jax.jit
+def quat_inverse(q):
+    """ For unit quaternions"""
+    res = jnp.array([q[0], -q[1], -q[2], -q[3]])
+    return res
