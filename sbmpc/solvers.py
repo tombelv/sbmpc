@@ -40,8 +40,8 @@ class SbMPC:
 
         # the first call of jax is very slow, hence we should do this since the beginning
         # creating a fake initial state, reference and contact sequence
-        initial_state = jnp.zeros((self.model.nx,), dtype=self.dtype_general)
-        initial_reference = jnp.zeros((self.model.nx,), dtype=self.dtype_general)
+        initial_state = jnp.zeros((self.model.nx, ), dtype=self.dtype_general)
+        initial_reference = jnp.zeros((self.model.nx, ), dtype=self.dtype_general)
 
         self.jit_compute_control_mppi(initial_state, initial_reference, self.best_control_vars, self.master_key)
 
@@ -102,7 +102,7 @@ class SbMPC:
         best_index = jnp.nanargmin(costs)
         best_cost = costs.take(best_index)
 
-        # # Compute MPPI update
+        # Compute MPPI update
         beta = best_cost
         temperature = 1.
         exp_costs = jnp.exp((-1. / temperature) * (costs - beta))
