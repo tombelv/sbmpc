@@ -1,34 +1,31 @@
 import time
-import os
 
 import jax
 import jax.numpy as jnp
+
 import matplotlib.pyplot as plt
 
-import sbmpc.utils.simulation as simulation
-from sbmpc.model import ModelJax
+from sbmpc.model import Model
 from sbmpc.solvers import SbMPC
 from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
+import sbmpc.utils.simulation as simulation
+
+input_max = jnp.array([2, 4])
+input_min = -input_max
 
 
-class Unicycle(ModelJax):
-    """ Kinematic model of a unicycle robot controlled with driving and steering velocities"""
-    def __init__(self, nx: int, nu: int):
-        super().__init__(nx, nu)
-        self.input_max = jnp.array([2, 4])
-        self.input_min = -self.input_max
-
-    def dynamics(self, state: jnp.array, inputs: jnp.array) -> jnp.array:
-        state_dot = jnp.array([inputs[0]*jnp.cos(state[2]),
-                               inputs[0]*jnp.sin(state[2]),
-                               inputs[1]], dtype=jnp.float32)
-        return state_dot
+@jax.jit
+def unicycle_dynamics(state: jnp.array, inputs: jnp.array) -> jnp.array:
+    state_dot = jnp.array([inputs[0] * jnp.cos(state[2]),
+                           inputs[0] * jnp.sin(state[2]),
+                           inputs[1]], dtype=jnp.float32)
+    return state_dot
 
 
 def cost_fn(state: jnp.array, state_ref: jnp.array, inputs: jnp.array) -> jnp.float32:
     """ Cost function to regulate the state to the desired value"""
     error = state - state_ref
-    return 50*jnp.linalg.norm(error, ord=2) + jnp.linalg.norm(inputs, ord=2)
+    return 50 * jnp.linalg.norm(error, ord=2) + jnp.linalg.norm(inputs, ord=2)
 
 
 class Simulation(simulation.Simulator):
@@ -46,22 +43,13 @@ class Simulation(simulation.Simulator):
         self.input_traj[self.iter, :] = ctrl
 
         # Simulate the dynamics
-        self.current_state = self.model.integrate_jit(self.current_state, ctrl, self.controller.dt)
+        self.current_state = self.model.integrate(self.current_state, ctrl, self.controller.dt)
         self.state_traj[self.iter + 1, :] = self.current_state
 
 
 if __name__ == "__main__":
 
-    # TODO: test if these flags lead to any speedup
-    # os.environ['XLA_FLAGS'] = (
-    #     '--xla_gpu_enable_triton_softmax_fusion=true '
-    #     '--xla_gpu_triton_gemm_any=True '
-    #     '--xla_gpu_enable_async_collectives=true '
-    #     '--xla_gpu_enable_latency_hiding_scheduler=true '
-    #     '--xla_gpu_enable_highest_priority_async_stream=true '
-    # )
-
-    system = Unicycle(3, 2)
+    system = Model(unicycle_dynamics, 3, 0, 2, [input_min, input_max])
 
     x_init = jnp.array([2, 2, 0], dtype=jnp.float32)
 
