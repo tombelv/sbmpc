@@ -5,7 +5,7 @@ import jax.numpy as jnp
 
 import matplotlib.pyplot as plt
 
-from sbmpc.new_model import ModelMjx
+from sbmpc.model import ModelMjx
 from sbmpc.solvers import SbMPC
 from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
 import sbmpc.utils.simulation as simulation
