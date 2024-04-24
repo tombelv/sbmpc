@@ -68,7 +68,7 @@ class Objective(BaseObjective):
         vel_err = state[7:10] - state_ref[7:10]
         ang_vel_err = state[10:] - state_ref[10:]
 
-        return (1 * pos_err.transpose() @ pos_err +
+        return (10 * pos_err.transpose() @ pos_err +
                 0.01 * att_err.transpose() @ att_err +
                 0.5 * vel_err.transpose() @ vel_err +
                 0.01 * ang_vel_err.transpose() @ ang_vel_err +
@@ -81,8 +81,8 @@ class Objective(BaseObjective):
         ang_vel_err = state[10:] - state_ref[10:]
 
         return (50 * pos_err.transpose() @ pos_err +
-                1 * att_err.transpose() @ att_err +
-                5 * vel_err.transpose() @ vel_err +
+                0.1 * att_err.transpose() @ att_err +
+                0.5 * vel_err.transpose() @ vel_err +
                 1 * ang_vel_err.transpose() @ ang_vel_err)
 
 
@@ -91,9 +91,8 @@ class Simulation(simulation.Simulator):
         super().__init__(initial_state, model, controller, num_iterations)
 
     def update(self):
-        q_des = jnp.array([0., 0., 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
-        x_des = jnp.concatenate([q_des,
-                                 jnp.zeros(self.model.nv, dtype=jnp.float32)], axis=0)
+        q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
+        x_des = jnp.concatenate([q_des, jnp.zeros(self.model.nv, dtype=jnp.float32)], axis=0)
         # Compute the optimal input sequence
         time_start = time.time_ns()
         input_sequence = self.controller.compute_control_action(self.current_state, x_des).block_until_ready()
@@ -111,23 +110,18 @@ if __name__ == "__main__":
 
     system = Model(quadrotor_dynamics, 7, 6, 4, [input_min, input_max])
 
-    q_init = jnp.array([0.5, 0.5, 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
+    q_init = jnp.array([0.0, 0.0, 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
 
-    x_init = jnp.concatenate([q_init,
-                             jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
+    x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
 
-    # x_init = x_init.at[7].set(0.1)
-
-    mpc_config = ConfigMPC(0.02, 25, 0.15, num_parallel_computations=10000)
+    mpc_config = ConfigMPC(0.02, 25, 0.25, num_parallel_computations=10000)
     gen_config = ConfigGeneral("float32", jax.devices("gpu")[0])
 
     solver = SbMPC(system, Objective(), mpc_config, gen_config, initial_guess=input_hover)
 
     # Setup and run the simulation
-    sim = Simulation(x_init, system, solver, 1000)
+    sim = Simulation(x_init, system, solver, 500)
     sim.simulate()
-
-    print(jnp.linalg.norm(sim.state_traj[-1, 3:7]))
 
     ax = plt.figure().add_subplot(projection='3d')
     # Plot x-y-z position of the robot
