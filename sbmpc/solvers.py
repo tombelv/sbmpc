@@ -167,7 +167,7 @@ class SbMPC:
         optimal_action : jnp.array
             The optimal input trajectory shaped (num_control_variables, )
         """
-        best_control_vars, best_cost, costs = self.jit_compute_control_mppi(state,
+        best_control_vars, _, _ = self.jit_compute_control_mppi(state,
                                                                             reference,
                                                                             self.best_control_vars,
                                                                             self.master_key)

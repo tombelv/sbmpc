@@ -1,4 +1,4 @@
-import time
+import time, os
 
 import jax
 import jax.numpy as jnp
@@ -121,7 +121,7 @@ if __name__ == "__main__":
 
     x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
 
-    mpc_config = ConfigMPC(0.02, 25, 0.25, num_parallel_computations=10000)
+    mpc_config = ConfigMPC(0.02, 25, 0.2, num_parallel_computations=10000)
     gen_config = ConfigGeneral("float32", jax.devices("gpu")[0])
 
     solver = SbMPC(system, Objective(), mpc_config, gen_config, initial_guess=input_hover)
