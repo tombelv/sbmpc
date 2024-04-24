@@ -20,6 +20,7 @@ inertia = jnp.array([2.3951e-5, 2.3951e-5, 3.2347e-5], dtype=jnp.float32)
 inertia_mat = jnp.diag(inertia)
 
 spatial_inertia_mat = jnp.diag(jnp.concatenate([mass*jnp.ones(3, dtype=jnp.float32), inertia]))
+spatial_inertia_mat_inv = jnp.linalg.inv(spatial_inertia_mat)
 
 input_hover = jnp.array([mass*gravity, 0., 0., 0.], dtype=jnp.float32)
 
@@ -46,11 +47,11 @@ def quadrotor_dynamics(state: jnp.array, inputs: jnp.array) -> jnp.array:
     orientation_mat = quat2rotm(quat)
     ang_vel_quat = jnp.array([0., state[10], state[11], state[12]])
 
-    total_force = jnp.array([0., 0., inputs[0]]) - mass*orientation_mat.transpose() @ jnp.array([0., 0., gravity])
+    total_force = jnp.array([0., 0., inputs[0]]) - mass*gravity*orientation_mat[2, :]  # transpose + 3rd col = 3rd row
 
     total_torque = 1e-3*inputs[1:4] - skew(ang_vel) @ inertia_mat @ ang_vel  # multiplication by normalization factor
 
-    acc = jnp.linalg.inv(spatial_inertia_mat) @ jnp.concatenate([total_force, total_torque])
+    acc = spatial_inertia_mat_inv @ jnp.concatenate([total_force, total_torque])
 
     state_dot = jnp.concatenate([state[7:10],
                                  0.5 * quat_product(quat, ang_vel_quat),
