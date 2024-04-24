@@ -15,6 +15,7 @@ class BaseObjective(ABC):
     def final_cost(self, state, reference):
         return 0.0
 
+
 class SbMPC:
     def __init__(self, model: BaseModel, objective: BaseObjective, config_mpc: ConfigMPC, config_general: ConfigGeneral, initial_guess=None):
         self.model = model
@@ -120,7 +121,7 @@ class SbMPC:
         # Compute MPPI update
         beta = best_cost
         temperature = 1.
-        exp_costs = jnp.exp((-1. / temperature) * (costs - beta))
+        exp_costs = jnp.exp((1. / temperature) * (beta - costs))
         denom = jnp.sum(exp_costs)
         weights = exp_costs / denom
         weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * additional_random_parameters_clipped.reshape(
@@ -129,12 +130,16 @@ class SbMPC:
 
         return best_control_vars, best_cost, costs
 
-    def compute_control_action(self, state, reference):
+    def compute_control_action(self, state, reference, shift_guess=True):
         best_control_vars, best_cost, costs = self.jit_compute_control_mppi(state,
                                                                             reference,
                                                                             self.best_control_vars,
                                                                             self.master_key)
 
-        self.best_control_vars = best_control_vars
+        if shift_guess:
+            self.best_control_vars = jnp.roll(best_control_vars, shift=-self.model.nu, axis=0)
+            self.best_control_vars = self.best_control_vars.at[-1*self.model.nu:].set(self.best_control_vars[-2*self.model.nu:-1*self.model.nu])
+        else:
+            self.best_control_vars = best_control_vars
 
         return best_control_vars
