@@ -52,13 +52,6 @@ class SbMPC:
         # Jit the controller function
         self.jit_compute_control_mppi = jax.jit(self.compute_control_mppi, device=config_general.device)
 
-        # the first call of jax is very slow, hence we should do this since the beginning
-        # creating a fake initial state, reference and contact sequence
-        initial_state = jnp.zeros((self.model.nx, ), dtype=self.dtype_general)
-        initial_reference = jnp.zeros((self.model.nx, ), dtype=self.dtype_general)
-
-        self.jit_compute_control_mppi(initial_state, initial_reference, self.best_control_vars, self.master_key)
-
     def clip_input(self, control_variables):
         return jnp.clip(control_variables, self.input_min_full_horizon, self.input_max_full_horizon)
 
@@ -168,9 +161,9 @@ class SbMPC:
             The optimal input trajectory shaped (num_control_variables, )
         """
         best_control_vars, _, _ = self.jit_compute_control_mppi(state,
-                                                                            reference,
-                                                                            self.best_control_vars,
-                                                                            self.master_key)
+                                                                reference,
+                                                                self.best_control_vars,
+                                                                self.master_key)
 
         if shift_guess:
             self.best_control_vars = jnp.roll(best_control_vars, shift=-self.model.nu, axis=0)

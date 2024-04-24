@@ -126,6 +126,9 @@ if __name__ == "__main__":
 
     solver = SbMPC(system, Objective(), mpc_config, gen_config, initial_guess=input_hover)
 
+    # dummy for jitting
+    input_sequence = solver.compute_control_action(x_init, x_init).block_until_ready()
+
     # Setup and run the simulation
     sim = Simulation(x_init, system, solver, 500)
     sim.simulate()
