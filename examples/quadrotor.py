@@ -30,15 +30,19 @@ def quadrotor_dynamics(state: jnp.array, inputs: jnp.array) -> jnp.array:
     """
     Simple quadrotor dynamics model with CoM placed at the geometric center
 
-    Args:
-        state (jnp.array): state vector [pos (world frame),
-                                         attitude (unit quaternion [w, x, y, z]),
-                                         vel (world frame),
-                                         angular_velocity (body frame)]
-        inputs (jnp.array): input vector [thrust (along the body-frame z axis),
-                                          torque (body frame)]
-    Returns:
-        state_dot (jnp.array): time derivative of state with given inputs
+    Parameters
+    ----------
+    state : jnp.array
+        state vector [pos (world frame),
+                      attitude (unit quaternion [w, x, y, z]),
+                      vel (world frame),
+                      angular_velocity (body frame)]
+    inputs : jnp.array):
+        input vector [thrust (along the body-frame z axis), torque (body frame)]
+    Returns
+    -------
+    state_dot :jnp.array
+        time derivative of state with given inputs
     """
 
     quat = state[3:7]
@@ -63,13 +67,18 @@ def quadrotor_dynamics(state: jnp.array, inputs: jnp.array) -> jnp.array:
 
 
 class Objective(BaseObjective):
-    def running_cost(self, state: jnp.array, state_ref: jnp.array, inputs: jnp.array) -> jnp.float32:
-        """ Cost function to regulate the state to the desired value"""
+    """ Cost function for the Quadrotor regulation task"""
+
+    def compute_state_error(self, state: jnp.array, state_ref: jnp.array) -> jnp.array:
         pos_err = state[0:3] - state_ref[0:3]
         att_err = quat_product(quat_inverse(state[3:7]), state_ref[3:7])[1:4]
         vel_err = state[7:10] - state_ref[7:10]
         ang_vel_err = state[10:] - state_ref[10:]
 
+        return pos_err, att_err, vel_err, ang_vel_err
+
+    def running_cost(self, state: jnp.array, state_ref: jnp.array, inputs: jnp.array) -> jnp.float32:
+        pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, state_ref)
         return (10 * pos_err.transpose() @ pos_err +
                 0.01 * att_err.transpose() @ att_err +
                 0.5 * vel_err.transpose() @ vel_err +
@@ -77,11 +86,7 @@ class Objective(BaseObjective):
                 (inputs-input_hover).transpose() @ jnp.diag(jnp.array([1, 0.01, 0.01, 0.5])) @ (inputs-input_hover) )
 
     def final_cost(self, state, state_ref):
-        pos_err = state[0:3] - state_ref[0:3]
-        att_err = quat_product(quat_inverse(state[3:7]), state_ref[3:7])[1:4]
-        vel_err = state[7:10] - state_ref[7:10]
-        ang_vel_err = state[10:] - state_ref[10:]
-
+        pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, state_ref)
         return (50 * pos_err.transpose() @ pos_err +
                 0.1 * att_err.transpose() @ att_err +
                 0.5 * vel_err.transpose() @ vel_err +

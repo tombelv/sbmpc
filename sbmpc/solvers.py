@@ -93,7 +93,22 @@ class SbMPC:
     def compute_control_mppi(self, state, reference, best_control_vars, key):
         """
         This function computes the control parameters by applying MPPI.
+        Parameters
+        ----------
+        state : jnp.array
+            The current state of the robot for feedback
+        reference : jnp.array
+            The desired state of the robot
+        best_control_vars : jnp.array
+            The solution guess from the previous iterations
+        key
+         RNG key
+        Returns
+        -------
+        optimal_action : jnp.array
+            The optimal input trajectory shaped (num_control_variables, )
         """
+
         # Generate random parameters
         # The first control parameters is the old best one, so we add zero noise there
         additional_random_parameters = self.initial_random_parameters * 0.0
@@ -131,6 +146,21 @@ class SbMPC:
         return best_control_vars, best_cost, costs
 
     def compute_control_action(self, state, reference, shift_guess=True):
+        """
+        This function computes the control action by applying MPPI.
+        Parameters
+        ----------
+        state : jnp.array
+            The current state of the robot for feedback
+        reference : jnp.array
+            The desired state of the robot
+        shift_guess : bool (default = True)
+            Determines if the resulting control action is stored in a shifted version of the control variables
+        Returns
+        -------
+        optimal_action : jnp.array
+            The optimal input trajectory shaped (num_control_variables, )
+        """
         best_control_vars, best_cost, costs = self.jit_compute_control_mppi(state,
                                                                             reference,
                                                                             self.best_control_vars,
