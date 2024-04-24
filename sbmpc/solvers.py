@@ -64,12 +64,18 @@ class SbMPC:
 
     def compute_rollout(self, initial_state, reference, control_variables):
         """Calculate cost of a rollout of the dynamics given random control variables.
-        Args:
-            initial_state (np.array): actual state of the robot
-            reference (np.array): desired state of the robot
-            control_variables (np.array): parameters for the controllers
-        Returns:
-            (float): cost of the rollout
+        Parameters
+        ----------
+        initial_state : jnp.array
+            Initial state of the rollout.
+        reference : jnp.array
+            Desired state of the robot
+        control_variables
+            Vector of control inputs over the trajectory
+        Returns
+        -------
+        cost : float
+            cost of the rollout
         """
         def iterate_fun(idx, carry):
             sum_cost, curr_state, reference = carry

@@ -19,6 +19,9 @@ class BaseModel(ABC):
             self.input_min = input_bounds[0]
             self.input_max = input_bounds[1]
 
+    def integrate(self, state, inputs, dt):
+        pass
+
     @abstractmethod
     def setInitialState(self, state):
         pass
@@ -81,7 +84,6 @@ class Model(BaseModel):
                     v_kp1])
 
 
-
 class ModelMjx(BaseModel):
     def __init__(self, model_path):
         self.model_path = model_path
@@ -109,19 +111,6 @@ class ModelMjx(BaseModel):
         return mjx_data
 
 
-# Maybe this should just become a decorator  Model and ModelMjx
-# class ModelJax:
-#     def __init__(self,  other_model: Model, device: jax.Device = jax.devices('cpu')[0], dtype_general="float32"):
-#         self.model = other_model
-#         self.device = device
-#         self.dtype_general = dtype_general
-#         # self.input_max = self.model.input_max
-#         # self.input_min = self.model.input_min
-#
-#         self.integrate = jax.jit(self.model.integrate, device=device)
-#
-#         # Make one dummy integration to compile during construction
-#         zero_ctrl = jnp.zeros(self.model.nu, dtype=dtype_general)
-#         self.integrate(self.model.state0, zero_ctrl, 0.0)
+
 
         
