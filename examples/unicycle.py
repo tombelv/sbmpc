@@ -37,7 +37,8 @@ class Simulation(simulation.Simulator):
         x_des = jnp.array([0, 0, 0], dtype=jnp.float32)
         # Compute the optimal input sequence
         time_start = time.time_ns()
-        input_sequence = self.controller.compute_control_action(self.current_state, x_des).block_until_ready()
+        # For some reason, shifting the solution for the unicycle does not work well. So it is disabled.
+        input_sequence = self.controller.compute_control_action(self.current_state, x_des, shift_guess=False).block_until_ready()
         print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
         ctrl = input_sequence[:self.model.nu]
 
@@ -50,7 +51,7 @@ class Simulation(simulation.Simulator):
 
 if __name__ == "__main__":
 
-    system = Model(unicycle_dynamics, 3, 0, 2, [input_min, input_max])
+    system = Model(unicycle_dynamics, 3, 0, 2, [input_min, input_max], integrator_type="rk4")
 
     x_init = jnp.array([2, 2, 0], dtype=jnp.float32)
 

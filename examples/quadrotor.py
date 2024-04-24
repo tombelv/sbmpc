@@ -61,6 +61,7 @@ def quadrotor_dynamics(state: jnp.array, inputs: jnp.array) -> jnp.array:
     return state_dot
 
 
+
 class Objective(BaseObjective):
     def running_cost(self, state: jnp.array, state_ref: jnp.array, inputs: jnp.array) -> jnp.float32:
         """ Cost function to regulate the state to the desired value"""
@@ -129,6 +130,7 @@ if __name__ == "__main__":
     ax.plot(sim.state_traj[:, 0], sim.state_traj[:, 1], sim.state_traj[:, 2])
     plt.show()
     plt.plot(sim.state_traj[:, 0:3])
+    plt.legend(["x", "y", "z"])
     plt.show()
     # Plot the input trajectory
     plt.plot(sim.input_traj)

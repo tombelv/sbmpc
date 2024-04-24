@@ -6,15 +6,39 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
 from sbmpc.model import ModelMjx
-from sbmpc.solvers import SbMPC
+from sbmpc.solvers import SbMPC, BaseObjective
 from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
 import sbmpc.utils.simulation as simulation
+from sbmpc.utils.geometry import quat_product, quat_inverse
 
-def cost_fn(state: jnp.array, state_ref: jnp.array, inputs: jnp.array) -> jnp.float32:
-    """ Cost function to regulate the state to the desired value"""
-    error = state - state_ref
-    return 50 * jnp.linalg.norm(error, ord=2) + jnp.linalg.norm(inputs, ord=2)
+# This should actually be taken from the model
+input_hover = jnp.array([0.027*9.81, 0., 0., 0.], dtype=jnp.float32)
 
+
+class Objective(BaseObjective):
+    def running_cost(self, state: jnp.array, state_ref: jnp.array, inputs: jnp.array) -> jnp.float32:
+        """ Cost function to regulate the state to the desired value"""
+        pos_err = state[0:3] - state_ref[0:3]
+        att_err = quat_product(quat_inverse(state[3:7]), state_ref[3:7])[1:4]
+        vel_err = state[7:10] - state_ref[7:10]
+        ang_vel_err = state[10:] - state_ref[10:]
+
+        return (10 * pos_err.transpose() @ pos_err +
+                0.01 * att_err.transpose() @ att_err +
+                0.5 * vel_err.transpose() @ vel_err +
+                0.01 * ang_vel_err.transpose() @ ang_vel_err +
+                (inputs-input_hover).transpose() @ jnp.diag(jnp.array([1, 0.01, 0.01, 0.5])) @ (inputs-input_hover) )
+
+    def final_cost(self, state, state_ref):
+        pos_err = state[0:3] - state_ref[0:3]
+        att_err = quat_product(quat_inverse(state[3:7]), state_ref[3:7])[1:4]
+        vel_err = state[7:10] - state_ref[7:10]
+        ang_vel_err = state[10:] - state_ref[10:]
+
+        return (50 * pos_err.transpose() @ pos_err +
+                0.1 * att_err.transpose() @ att_err +
+                0.5 * vel_err.transpose() @ vel_err +
+                1 * ang_vel_err.transpose() @ ang_vel_err)
 
 class Simulation(simulation.Simulator):
     def __init__(self, initial_state, model, controller, num_iterations):
@@ -46,7 +70,7 @@ if __name__ == "__main__":
     # mpc_config = ConfigMPC(0.02, 50, 0.1, num_parallel_computations=5000)
     # gen_config = ConfigGeneral("float32", jax.devices("gpu")[0])
 
-    # solver = SbMPC(system, cost_fn, mpc_config, gen_config)
+    # solver = SbMPC(system, Objective(), mpc_config, gen_config)
 
     # # Setup and run the simulation
     # sim = Simulation(x_init, system, solver, 600)

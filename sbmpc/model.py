@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 from abc import ABC, abstractmethod
 import mujoco
+import numpy as np
 from mujoco import mjx
 
 
@@ -19,35 +20,66 @@ class BaseModel(ABC):
             self.input_max = input_bounds[1]
 
     @abstractmethod
-    def integrate(self, state, inputs, dt: float):
-        pass
-
-    @abstractmethod
     def setInitialState(self, state):
         pass
 
 
 class Model(BaseModel):
-    def __init__(self, model_dynamics, nq: int, nv: int, nu: int, input_bounds=(-jnp.inf, jnp.inf)):
+    def __init__(self, model_dynamics,
+                 nq: int,
+                 nv: int,
+                 nu: int,
+                 input_bounds=(-jnp.inf, jnp.inf),
+                 integrator_type="si_euler"):
+
         super().__init__(nq, nv, nu, input_bounds)
 
         self.state0 = jnp.zeros(self.nx, dtype=jnp.float32)  # initstate
-        self.model_dynamics = model_dynamics
+        self.dynamics = model_dynamics
+
+        if integrator_type == "si_euler":
+            self.integrate = self.integrate_si_euler
+        elif integrator_type == "euler":
+            self.integrate = self.integrate_euler
+        elif integrator_type == "rk4":
+            self.integrate = self.integrate_rk4
+        else:
+            raise ValueError("""
+            Integrator type not supported.
+            Available types: si_euler, euler, rk4
+            """)
+
 
     def setInitialState(self, state):
         pass
 
-    def dynamics(self, state, inputs):
-        x_dot = self.model_dynamics(state, inputs)
-        return x_dot
-
-    def integrate(self, state, inputs, dt: float):
-        """ One-step integration of the dynamics using Rk4 method"""
+    def integrate_rk4(self, state, inputs, dt: float):
+        """
+        One-step integration of the dynamics using Rk4 method
+        """
         k1 = self.dynamics(state, inputs)
         k2 = self.dynamics(state + k1*dt/2., inputs)
         k3 = self.dynamics(state + k2 * dt / 2., inputs)
         k4 = self.dynamics(state + k3 * dt, inputs)
         return state + (dt/6.) * (k1 + 2. * k2 + 2. * k3 + k4)
+
+    def integrate_euler(self, state, inputs, dt: float):
+        """
+        One-step integration of the dynamics using Euler method
+        """
+        return state + dt * self.dynamics(state, inputs)
+
+    def integrate_si_euler(self, state, inputs, dt: float):
+        """
+        Semi-implicit Euler integration.
+
+        As of now this is probably implemented inefficiently because the whole dynamics is evaluated two times.
+        """
+        v_kp1 = state[self.nq:] + dt * self.dynamics(state, inputs)[self.nq:]
+        return jnp.concatenate([
+                    state[:self.nq] + dt * self.dynamics(jnp.concatenate([state[:self.nq], v_kp1]), inputs)[:self.nq],
+                    v_kp1])
+
 
 
 class ModelMjx(BaseModel):
