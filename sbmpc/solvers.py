@@ -147,14 +147,11 @@ class SbMPC:
         costs = jnp.where(jnp.isnan(costs), 1000000., costs)
         costs = jnp.where(jnp.isinf(costs), 1000000., costs)
 
-        # Take the best found control parameters
-        best_index = jnp.nanargmin(costs)
-        best_cost = costs.take(best_index)
-
         # Compute MPPI update
-        beta = best_cost
-        temperature = 1.
-        exp_costs = jnp.exp((1. / temperature) * (beta - costs))
+        best_cost, worst_cost = self.sort_costs(costs)
+        exp_costs = self.exp_costs_invariant(costs, best_cost, worst_cost)
+        # exp_costs = self.exp_costs_shifted(costs, best_cost)
+
         denom = jnp.sum(exp_costs)
         weights = exp_costs / denom
         weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * additional_random_parameters_clipped.reshape(
@@ -191,3 +188,32 @@ class SbMPC:
             self.best_control_vars = best_control_vars
 
         return best_control_vars
+
+    def sort_costs(self, costs):
+        # Take the best found control parameters
+        best_index = jnp.nanargmin(costs)
+        worst_index = jnp.nanargmax(costs)
+        best_cost = costs.take(best_index)
+        worst_cost = costs.take(worst_index)
+
+        return best_cost, worst_cost
+
+    def exp_costs_shifted(self, costs, best_cost):
+
+        lam = 1.
+        exp_costs = jnp.exp(- lam * (costs - best_cost))
+
+        return exp_costs
+
+    def exp_costs_invariant(self, costs, best_cost, worst_cost):
+        """
+        For a comparison see:
+        G. Rizzi, J. J. Chung, A. Gawel, L. Ott, M. Tognon and R. Siegwart,
+        "Robust Sampling-Based Control of Mobile Manipulators for Interaction With Articulated Objects,"
+        in IEEE Transactions on Robotics, vol. 39, no. 3, pp. 1929-1946, June 2023, doi: 10.1109/TRO.2022.3233343.
+        """
+
+        h = 20.
+        exp_costs = jnp.exp(- h * (costs - best_cost) / (worst_cost - best_cost))
+
+        return exp_costs

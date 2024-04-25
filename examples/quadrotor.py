@@ -82,14 +82,14 @@ class Objective(BaseObjective):
         return (10 * pos_err.transpose() @ pos_err +
                 0.01 * att_err.transpose() @ att_err +
                 0.5 * vel_err.transpose() @ vel_err +
-                0.01 * ang_vel_err.transpose() @ ang_vel_err +
+                0.1 * ang_vel_err.transpose() @ ang_vel_err +
                 (inputs-input_hover).transpose() @ jnp.diag(jnp.array([1, 0.01, 0.01, 0.5])) @ (inputs-input_hover) )
 
     def final_cost(self, state, state_ref):
         pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, state_ref)
-        return (50 * pos_err.transpose() @ pos_err +
+        return (100 * pos_err.transpose() @ pos_err +
                 0.1 * att_err.transpose() @ att_err +
-                0.5 * vel_err.transpose() @ vel_err +
+                5 * vel_err.transpose() @ vel_err +
                 1 * ang_vel_err.transpose() @ ang_vel_err)
 
 
