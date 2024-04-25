@@ -131,12 +131,15 @@ class SbMPC:
 
         # GAUSSIAN
         num_sample_gaussian_1 = self.num_parallel_computations - 1
+
+        # Multivariate sampling with different standard deviation for the different inputs
         # sampled_variation = jax.random.multivariate_normal(key,
         #                                                    mean=jnp.zeros(self.model.nu),
         #                                                    cov=self.sigma_mppi**2*jnp.identity(self.model.nu),
         #                                                    shape=(num_sample_gaussian_1, self.horizon)).reshape(
         #     num_sample_gaussian_1, self.num_control_variables)
 
+        # In this case, the sampling has the same standard deviation for all the variables
         sampled_variation = self.sigma_mppi * jax.random.normal(key=key,
                                                                 shape=(num_sample_gaussian_1,
                                                                        self.num_control_variables))
