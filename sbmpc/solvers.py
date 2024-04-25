@@ -17,7 +17,26 @@ class BaseObjective(ABC):
 
 
 class SbMPC:
+    """
+    Sampling-based MPC solver.
+    """
     def __init__(self, model: BaseModel, objective: BaseObjective, config_mpc: ConfigMPC, config_general: ConfigGeneral, initial_guess=None):
+        """
+        Initializes the solver with the model, the objective, configurations and initial guess.
+        Parameters
+        ----------
+        model: BaseModel
+            The model propagated during rollouts.
+        objective: BaseObjective
+            Required to compute the cost function in the rollout.
+        config_mpc: ConfigMPC
+            Contains the MPC related parameters such as the time horizon, number of samples, etc.
+        config_general: ConfigGeneral
+            Contains device and dtype config
+        initial_guess: jnp.ndarray (default zeros)
+            Initial guess used to construct the input trajectory for the first iteration. It is a nu-dimensional array
+            that is repeated over the control horizon.
+        """
         self.model = model
         self.objective = objective
 
