@@ -13,6 +13,8 @@ conda env create -f environment.yml
 ```
 
 # TODO
-[ ] Control parametrization (splines etc)
+- [ ] Control parametrization (splines etc)
+- [ ] Multivariate gaussian sampling 
+- [ ] Generic constraints
 
-[ ] Generic constraints
+

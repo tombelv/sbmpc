@@ -121,10 +121,10 @@ if __name__ == "__main__":
 
     x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
 
-    mpc_config = ConfigMPC(0.02, 25, 0.2, num_parallel_computations=10000)
+    mpc_config = ConfigMPC(0.02, 25, 0.2, num_parallel_computations=10000, initial_guess=input_hover)
     gen_config = ConfigGeneral("float32", jax.devices("gpu")[0])
 
-    solver = SbMPC(system, Objective(), mpc_config, gen_config, initial_guess=input_hover)
+    solver = SbMPC(system, Objective(), mpc_config, gen_config)
 
     # dummy for jitting
     input_sequence = solver.compute_control_action(x_init, x_init).block_until_ready()
