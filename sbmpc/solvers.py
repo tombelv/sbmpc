@@ -131,11 +131,20 @@ class SbMPC:
 
         # GAUSSIAN
         num_sample_gaussian_1 = self.num_parallel_computations - 1
-        additional_random_parameters = additional_random_parameters.at[1:self.num_parallel_computations].set(
-            self.sigma_mppi * jax.random.normal(key=key, shape=(num_sample_gaussian_1, self.num_control_variables)))
+        # sampled_variation = jax.random.multivariate_normal(key,
+        #                                                    mean=jnp.zeros(self.model.nu),
+        #                                                    cov=self.sigma_mppi**2*jnp.identity(self.model.nu),
+        #                                                    shape=(num_sample_gaussian_1, self.horizon)).reshape(
+        #     num_sample_gaussian_1, self.num_control_variables)
 
+        sampled_variation = self.sigma_mppi * jax.random.normal(key=key,
+                                                                shape=(num_sample_gaussian_1,
+                                                                       self.num_control_variables))
+
+        additional_random_parameters = additional_random_parameters.at[1:self.num_parallel_computations].set(sampled_variation)
+
+        # Compute the candidate control sequences considering input constraints
         control_vars_all = self.clip_input(best_control_vars + additional_random_parameters)
-
         additional_random_parameters_clipped = control_vars_all - best_control_vars
 
         # Do rollout
