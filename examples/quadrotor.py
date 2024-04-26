@@ -3,6 +3,10 @@ import time, os
 import jax
 import jax.numpy as jnp
 
+os.environ['XLA_FLAGS'] = (
+        '--xla_gpu_triton_gemm_any=True '
+    )
+
 import matplotlib.pyplot as plt
 
 from sbmpc.model import Model
@@ -115,9 +119,6 @@ class Simulation(simulation.Simulator):
 
 if __name__ == "__main__":
 
-    os.environ['XLA_FLAGS'] = (
-        '--xla_gpu_triton_gemm_any=True '
-    )
 
     system = Model(quadrotor_dynamics, 7, 6, 4, [input_min, input_max])
 
