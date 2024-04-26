@@ -1,4 +1,5 @@
 import jax
+import jax.numpy as jnp
 
 
 class ConfigGeneral:
@@ -8,13 +9,13 @@ class ConfigGeneral:
 
 
 class ConfigMPC:
-    def __init__(self, dt: float, horizon: int, sigma_mppi, num_parallel_computations: int = 10000, initial_guess = None):
+    def __init__(self, dt: float, horizon: int, std_dev_mppi: jnp.array, num_parallel_computations: int = 10000, initial_guess = None):
         self.dt = dt
         self.horizon = horizon
         self.num_parallel_computations = num_parallel_computations
 
         self.initial_guess = initial_guess
 
-        self.sigma_mppi = sigma_mppi
+        self.std_dev_mppi = std_dev_mppi
 
 

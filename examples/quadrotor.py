@@ -87,7 +87,7 @@ class Objective(BaseObjective):
                 0.01 * att_err.transpose() @ att_err +
                 0.5 * vel_err.transpose() @ vel_err +
                 0.1 * ang_vel_err.transpose() @ ang_vel_err +
-                (inputs-input_hover).transpose() @ jnp.diag(jnp.array([1, 0.01, 0.01, 0.5])) @ (inputs-input_hover) )
+                (inputs-input_hover).transpose() @ jnp.diag(jnp.array([1, 0.1, 0.1, 0.5])) @ (inputs-input_hover) )
 
     def final_cost(self, state, state_ref):
         pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, state_ref)
@@ -126,7 +126,11 @@ if __name__ == "__main__":
 
     x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
 
-    mpc_config = ConfigMPC(0.02, 25, 0.2, num_parallel_computations=10000, initial_guess=input_hover)
+    mpc_config = ConfigMPC(0.02,
+                           25,
+                           jnp.array([0.2, 0.3, 0.3, 0.15]),
+                           num_parallel_computations=10000,
+                           initial_guess=input_hover)
     gen_config = ConfigGeneral("float32", jax.devices("gpu")[0])
 
     solver = SbMPC(system, Objective(), mpc_config, gen_config)

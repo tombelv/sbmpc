@@ -41,7 +41,7 @@ class SbMPC:
         self.dt = config_mpc.dt
         self.horizon = config_mpc.horizon
         self.num_parallel_computations = config_mpc.num_parallel_computations
-        self.sigma_mppi = config_mpc.sigma_mppi
+        self.sigma_mppi = jnp.diag(config_mpc.std_dev_mppi**2)
 
         self.dtype_general = config_general.dtype_general
 
@@ -52,6 +52,8 @@ class SbMPC:
 
         clip_input_vectorized = jax.vmap(self.clip_input, in_axes=0, out_axes=0)
         self.clip_input = jax.jit(clip_input_vectorized, device=config_general.device)
+
+        self.std_dev_horizon = jnp.tile(config_mpc.std_dev_mppi, self.horizon)
 
         self.master_key = jax.random.PRNGKey(420)
         self.initial_random_parameters = jnp.zeros((self.num_parallel_computations, self.num_control_variables),
@@ -132,17 +134,15 @@ class SbMPC:
         # GAUSSIAN
         num_sample_gaussian_1 = self.num_parallel_computations - 1
 
-        # Multivariate sampling with different standard deviation for the different inputs
+        # Multivariate sampling with different standard deviation for the different inputs (slower implementation)
         # sampled_variation = jax.random.multivariate_normal(key,
         #                                                    mean=jnp.zeros(self.model.nu),
-        #                                                    cov=self.sigma_mppi**2*jnp.identity(self.model.nu),
+        #                                                    cov=self.sigma_mppi,
         #                                                    shape=(num_sample_gaussian_1, self.horizon)).reshape(
         #     num_sample_gaussian_1, self.num_control_variables)
 
-        # In this case, the sampling has the same standard deviation for all the variables
-        sampled_variation = self.sigma_mppi * jax.random.normal(key=key,
-                                                                shape=(num_sample_gaussian_1,
-                                                                       self.num_control_variables))
+        sampled_variation = jax.random.normal(key=key,
+                                              shape=(num_sample_gaussian_1, self.num_control_variables)) * self.std_dev_horizon
 
         additional_random_parameters = additional_random_parameters.at[1:self.num_parallel_computations].set(sampled_variation)
 
