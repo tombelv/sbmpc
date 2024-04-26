@@ -181,6 +181,8 @@ class SbMPC:
             The desired state of the robot
         shift_guess : bool (default = True)
             Determines if the resulting control action is stored in a shifted version of the control variables
+        num_steps : int
+            How many steps of optimization to make before returning the solution
         Returns
         -------
         optimal_action : jnp.array
