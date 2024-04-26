@@ -197,6 +197,8 @@ class SbMPC:
         else:
             self.best_control_vars = best_control_vars
 
+        self.update_key()
+
         return best_control_vars
 
     def sort_costs(self, costs):
@@ -227,3 +229,7 @@ class SbMPC:
         exp_costs = jnp.exp(- h * (costs - best_cost) / (worst_cost - best_cost))
 
         return exp_costs
+
+    def update_key(self):
+        newkey, subkey = jax.random.split(self.master_key)
+        self.master_key = newkey
