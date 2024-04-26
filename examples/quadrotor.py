@@ -106,7 +106,7 @@ class Simulation(simulation.Simulator):
         x_des = jnp.concatenate([q_des, jnp.zeros(self.model.nv, dtype=jnp.float32)], axis=0)
         # Compute the optimal input sequence
         time_start = time.time_ns()
-        input_sequence = self.controller.compute_control_action(self.current_state, x_des).block_until_ready()
+        input_sequence = self.controller.compute_control_action(self.current_state, x_des, num_steps=3).block_until_ready()
         print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
         ctrl = input_sequence[:self.model.nu]
 

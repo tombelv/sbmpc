@@ -170,7 +170,7 @@ class SbMPC:
 
         return best_control_vars, best_cost, costs
 
-    def compute_control_action(self, state, reference, shift_guess=True):
+    def compute_control_action(self, state, reference, shift_guess=True, num_steps=1):
         """
         This function computes the control action by applying MPPI.
         Parameters
@@ -186,18 +186,22 @@ class SbMPC:
         optimal_action : jnp.array
             The optimal input trajectory shaped (num_control_variables, )
         """
-        best_control_vars, _, _ = self.jit_compute_control_mppi(state,
-                                                                reference,
-                                                                self.best_control_vars,
-                                                                self.master_key)
+
+        best_control_vars = self.best_control_vars
+        # maybe this loop should be jitted to actually be more efficient
+        for i in range(num_steps):
+            best_control_vars, _, _ = self.jit_compute_control_mppi(state,
+                                                                    reference,
+                                                                    best_control_vars,
+                                                                    self.master_key)
+
+            self.update_key()
 
         if shift_guess:
             self.best_control_vars = jnp.roll(best_control_vars, shift=-self.model.nu, axis=0)
             self.best_control_vars = self.best_control_vars.at[-1*self.model.nu:].set(self.best_control_vars[-2*self.model.nu:-1*self.model.nu])
         else:
             self.best_control_vars = best_control_vars
-
-        self.update_key()
 
         return best_control_vars
 
