@@ -2,7 +2,6 @@ import jax
 import jax.numpy as jnp
 from abc import ABC, abstractmethod
 import mujoco
-import numpy as np
 from mujoco import mjx
 
 
@@ -88,27 +87,28 @@ class ModelMjx(BaseModel):
     def __init__(self, model_path):
         self.model_path = model_path
         # Load the MuJoCo model
-        mj_model = mujoco.MjModel.from_xml_path(self.model_path)
+        mj_model = mujoco.MjModel.from_xml_path(filename=self.model_path)
 
-        input_bounds = (-jnp.inf*jnp.ones(mj_model.nu, dtype=jnp.float32),
-                        jnp.inf*jnp.ones(mj_model.nu, dtype=jnp.float32))  # We should take input bounds from the model
+        input_bounds = (mj_model.actuator_ctrlrange[:, 0], mj_model.actuator_ctrlrange[:, 1])
 
         super().__init__(mj_model.nq, mj_model.nv, mj_model.nu, input_bounds)
         mj_data = mujoco.MjData(mj_model)
         # self.renderer = mujoco.Renderer(mj_model)
-        self.mjx_model = mjx.put_model(mj_model)
-        self.state0 = mjx.put_data(mj_model, mj_data)  # initial state on the gpu
+        self.model = mjx.put_model(mj_model)
+        self.data = mjx.put_data(mj_model, mj_data)  # initial state on the gpu
+
+        self.integrate = jax.jit(self._integrate)
 
     def setInitialState(self, state):
         pass
 
     # here we need to work on data that are already on the gpu
-    def integrate(self, state: mujoco.MjData, inputs: jnp.array, dt: float):
-        # here im applyng the control we need to check
-        # TODO check how to change the control interface using mjx
-        state.ctrl = inputs 
-        mjx_data = mjx.step(self.mjx_model, state)
-        return mjx_data
+    def _integrate(self, state: mjx.Data, inputs: jnp.array, dt: float):
+        state_next = state.replace(ctrl=inputs)
+        state_next = mjx.step(self.model, state_next)
+        return state_next
+
+
 
 
 
