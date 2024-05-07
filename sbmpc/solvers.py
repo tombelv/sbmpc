@@ -1,8 +1,10 @@
-from sbmpc.model import BaseModel
+from sbmpc.model import BaseModel, ModelMjx, Model
 from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
 
 import jax.numpy as jnp
 import jax
+
+import mujoco.mjx as mjx
 
 from abc import ABC, abstractmethod
 
@@ -65,17 +67,36 @@ class SbMPC:
         else:
             self.best_control_vars = jnp.tile(config_mpc.initial_guess, self.horizon)
 
-        self.vectorized_rollout = jax.vmap(self.compute_rollout, in_axes=(None, None, 0), out_axes=0)
-        self.jit_vectorized_rollout = jax.jit(self.vectorized_rollout, device=config_general.device)
+        # if isinstance(model, Model):
+        #     self.batch_state = self._batch_state
+        # elif isinstance(model, ModelMjx):
+        #     self.batch_state = self._batch_state_mjx
+        # else:
+        #     raise ValueError("""
+        #                 Invalid model.
+        #                 """)
+
+        # self.vectorized_rollout = jax.vmap(self.compute_rollout, in_axes=(None, None, 0), out_axes=0)
+        # self.jit_vectorized_rollout = jax.jit(self.vectorized_rollout, device=config_general.device)
+        self.jit_vectorized_rollout = jax.jit(self.compute_rollout_batched, device=config_general.device)
 
         # Jit the controller function
         self.jit_compute_control_mppi = jax.jit(self.compute_control_mppi, device=config_general.device)
+
+        running_cost_vec = jax.vmap(self.objective.running_cost, in_axes=(0, None, 0), out_axes=0)
+        self.running_cost = jax.jit(running_cost_vec, device=config_general.device)
+
+        final_cost_vec = jax.vmap(self.objective.final_cost, in_axes=(0, None), out_axes=0)
+        self.final_cost = jax.jit(final_cost_vec, device=config_general.device)
 
     def clip_input(self, control_variables):
         return jnp.clip(control_variables, self.input_min_full_horizon, self.input_max_full_horizon)
 
     def compute_rollout(self, initial_state, reference, control_variables):
-        """Calculate cost of a rollout of the dynamics given random control variables.
+        """
+        !!! As of now this only works for the classic model !!!
+
+        Calculate cost of a rollout of the dynamics given random control variables.
         Parameters
         ----------
         initial_state : jnp.array
@@ -107,6 +128,29 @@ class SbMPC:
         cost = cost + self.objective.final_cost(state, reference)
 
         return cost
+
+    def compute_rollout_batched(self, initial_state, reference, control_variables):
+
+        cost = jnp.zeros(self.num_parallel_computations)
+
+        curr_state = self._batch_state(initial_state)
+
+        for idx in range(self.horizon):
+            running_cost, curr_state = self._rollout_step(curr_state, reference, control_variables, idx)
+            cost += running_cost
+
+        cost += self.final_cost(curr_state, reference)
+
+        return cost
+
+    def _rollout_step(self, state, reference, control_variables, idx):
+        current_input = jax.lax.dynamic_slice(control_variables,
+                                              (0, idx * self.model.nu),
+                                              (self.num_parallel_computations, self.model.nu))
+        running_cost = self.running_cost(state, reference, current_input)
+        # Integrate the dynamics
+        state_next = self.model.integrate_rollout(state, current_input, self.dt)
+        return running_cost, state_next
 
     def compute_control_mppi(self, state, reference, best_control_vars, key):
         """
@@ -239,3 +283,12 @@ class SbMPC:
     def update_key(self):
         newkey, subkey = jax.random.split(self.master_key)
         self.master_key = newkey
+
+    # def _batch_state_mjx(self, state):
+    #     state_vec = jnp.concatenate([state.qpos, state.qvel])
+    #     return jnp.tile(state_vec, (self.num_parallel_computations, 1))
+
+    def _batch_state(self, state):
+        state = jnp.tile(state, (self.num_parallel_computations, 1))
+        return state
+

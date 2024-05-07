@@ -9,11 +9,13 @@ os.environ['XLA_FLAGS'] = (
 
 import matplotlib.pyplot as plt
 
-from sbmpc.model import Model
+from sbmpc.model import Model, ModelMjx
 from sbmpc.solvers import SbMPC, BaseObjective
 from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
 from sbmpc.utils.geometry import skew, quat_product, quat2rotm, quat_inverse
 import sbmpc.utils.simulation as simulation
+
+MODEL = "classic"
 
 input_max = jnp.array([1, 2.5, 2.5, 2])
 input_min = jnp.array([0, -2.5, -2.5, -2])
@@ -106,7 +108,7 @@ class Simulation(simulation.Simulator):
         x_des = jnp.concatenate([q_des, jnp.zeros(self.model.nv, dtype=jnp.float32)], axis=0)
         # Compute the optimal input sequence
         time_start = time.time_ns()
-        input_sequence = self.controller.compute_control_action(self.current_state, x_des, num_steps=1).block_until_ready()
+        input_sequence = self.controller.compute_control_action(self.current_state_vec(), x_des, num_steps=1).block_until_ready()
         print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
         ctrl = input_sequence[:self.model.nu]
 
@@ -114,16 +116,10 @@ class Simulation(simulation.Simulator):
 
         # Simulate the dynamics
         self.current_state = self.model.integrate(self.current_state, ctrl, self.controller.dt)
-        self.state_traj[self.iter + 1, :] = self.current_state
+        self.state_traj[self.iter + 1, :] = self.current_state_vec()
 
 
 if __name__ == "__main__":
-
-    system = Model(quadrotor_dynamics, 7, 6, 4, [input_min, input_max])
-
-    q_init = jnp.array([0.0, 0.0, 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
-
-    x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
 
     mpc_config = ConfigMPC(0.02,
                            25,
@@ -132,13 +128,26 @@ if __name__ == "__main__":
                            initial_guess=input_hover)
     gen_config = ConfigGeneral("float32", jax.devices("gpu")[0])
 
+    if MODEL == "classic":
+        system = Model(quadrotor_dynamics, 7, 6, 4, [input_min, input_max])
+        q_init = jnp.array([0.0, 0.0, 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
+        x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
+        state_init = x_init
+    elif MODEL == "mjx":
+        system = ModelMjx("bitcraze_crazyflie_2/cf2.xml")
+        q_init = system.data.qpos
+        x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
+        state_init = system.data
+    else:
+        raise ValueError("Model must be either 'classic' or 'mjx'")
+
     solver = SbMPC(system, Objective(), mpc_config, gen_config)
 
     # dummy for jitting
     input_sequence = solver.compute_control_action(x_init, x_init).block_until_ready()
 
     # Setup and run the simulation
-    sim = Simulation(x_init, system, solver, 500)
+    sim = Simulation(state_init, system, solver, 500)
     sim.simulate()
 
     ax = plt.figure().add_subplot(projection='3d')

@@ -1,5 +1,7 @@
 <mujoco model="cf2">
-  <option integrator="Euler" timestep="0.02" density="1.225" viscosity="1.8e-5"/>
+  <option integrator="Euler" timestep="0.02" iterations="1" ls_iterations="5">
+    <flag eulerdamp="disable"/>
+  </option>
 
   <!-- Original settings
   <option integrator="RK4" timestep="0.002" density="1.225" viscosity="1.8e-5"/>
@@ -72,7 +74,7 @@
   </asset>
 
   <worldbody>
-    <body name="cf2" pos="0 0 0.1" childclass="cf2">
+    <body name="cf2" pos="0 0 0" childclass="cf2">
       <freejoint/>
       <inertial pos="0 0 0" mass="0.027" diaginertia="2.3951e-5 2.3951e-5 3.2347e-5"/>
       <camera name="track" pos="-1 0 .5" xyaxes="0 -1 0 1 0 2" mode="trackcom"/>
@@ -123,10 +125,10 @@
   </worldbody>
 
   <actuator>
-    <motor class="cf2" ctrlrange="0 0.35" gear="0 0 1 0 0 0" site="actuation" name="body_thrust"/>
-    <motor class="cf2" ctrlrange="-1 1" gear="0 0 0 -0.001 0 0" site="actuation" name="x_moment"/>
-    <motor class="cf2" ctrlrange="-1 1" gear="0 0 0 0 -0.001 0" site="actuation" name="y_moment"/>
-    <motor class="cf2" ctrlrange="-1 1" gear="0 0 0 0 0 -0.001" site="actuation" name="z_moment"/>
+    <motor class="cf2" ctrlrange="0 1" gear="0 0 1 0 0 0" site="actuation" name="body_thrust"/>
+    <motor class="cf2" ctrlrange="-1 1" gear="0 0 0 0.001 0 0" site="actuation" name="x_moment"/>
+    <motor class="cf2" ctrlrange="-1 1" gear="0 0 0 0 0.001 0" site="actuation" name="y_moment"/>
+    <motor class="cf2" ctrlrange="-1 1" gear="0 0 0 0 0 0.001" site="actuation" name="z_moment"/>
   </actuator>
 
   <sensor>

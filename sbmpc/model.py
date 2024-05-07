@@ -21,6 +21,9 @@ class BaseModel(ABC):
     def integrate(self, state, inputs, dt):
         pass
 
+    def integrate_rollout(self, state, inputs, dt):
+        pass
+
     @abstractmethod
     def setInitialState(self, state):
         pass
@@ -50,6 +53,9 @@ class Model(BaseModel):
             Integrator type not supported.
             Available types: si_euler, euler, rk4
             """)
+
+        integrate_vect = jax.vmap(self.integrate, in_axes=(0, 0, None))
+        self.integrate_rollout = jax.jit(integrate_vect)
 
 
     def setInitialState(self, state):
@@ -97,16 +103,24 @@ class ModelMjx(BaseModel):
         self.model = mjx.put_model(mj_model)
         self.data = mjx.put_data(mj_model, mj_data)  # initial state on the gpu
 
-        self.integrate = jax.jit(self._integrate)
+        integrate_vect = jax.vmap(self._integrate, in_axes=(0, 0, None))
+        self.integrate_rollout = jax.jit(integrate_vect)
+        self.integrate = jax.jit(self._integrate_mjx)
 
     def setInitialState(self, state):
         pass
 
     # here we need to work on data that are already on the gpu
-    def _integrate(self, state: mjx.Data, inputs: jnp.array, dt: float):
+    def _integrate_mjx(self, state: mjx.Data, inputs: jnp.array, dt: float):
         state_next = state.replace(ctrl=inputs)
         state_next = mjx.step(self.model, state_next)
         return state_next
+
+    def _integrate(self, state: jnp.ndarray, inputs: jnp.array, dt: float):
+        data = mjx.make_data(self.model)
+        data_next = data.replace(qpos=state[:self.model.nq], qvel=state[self.model.nq:], ctrl=inputs)
+        data_next = mjx.step(self.model, data_next)
+        return jnp.concatenate([data_next.qpos, data_next.qvel])
 
 
 
