@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 
 class BaseObjective(ABC):
     @abstractmethod
-    def running_cost(self, state, reference, inputs):
+    def running_cost(self, state, inputs, reference):
         pass
 
     def final_cost(self, state, reference):
@@ -91,7 +91,7 @@ class SbMPC:
         # Jit the controller function
         self.jit_compute_control_mppi = jax.jit(self.compute_control_mppi, device=config_general.device)
 
-        running_cost_vec = jax.vmap(self.objective.running_cost, in_axes=(0, None, 0), out_axes=0)
+        running_cost_vec = jax.vmap(self.objective.running_cost, in_axes=(0, 0, None), out_axes=0)
         self.running_cost = jax.jit(running_cost_vec, device=config_general.device)
 
         final_cost_vec = jax.vmap(self.objective.final_cost, in_axes=(0, None), out_axes=0)
@@ -123,7 +123,7 @@ class SbMPC:
 
             current_input = jax.lax.dynamic_slice_in_dim(control_variables, idx * self.model.nu, self.model.nu)
 
-            running_cost = self.objective.running_cost(curr_state, reference, current_input)
+            running_cost = self.objective.running_cost(curr_state, current_input, reference[idx, :])
 
             # Integrate the dynamics
             state_next = self.model.integrate(curr_state, current_input, self.dt)
@@ -133,7 +133,7 @@ class SbMPC:
         carry = (jnp.float32(0.0), initial_state, reference)
         cost, state, reference = jax.lax.fori_loop(0, self.horizon, iterate_fun, carry)
 
-        cost = cost + self.objective.final_cost(state, reference)
+        cost = cost + self.objective.final_cost(state, reference[self.horizon, :])
 
         return cost
 
@@ -147,7 +147,7 @@ class SbMPC:
             running_cost, curr_state = self._rollout_step(curr_state, reference, control_variables, idx)
             cost += running_cost
 
-        cost += self.final_cost(curr_state, reference)
+        cost += self.final_cost(curr_state, reference[self.horizon, :])
 
         return cost
 
@@ -155,7 +155,7 @@ class SbMPC:
         current_input = jax.lax.dynamic_slice(control_variables,
                                               (0, idx * self.model.nu),
                                               (self.num_parallel_computations, self.model.nu))
-        running_cost = self.running_cost(state, reference, current_input)
+        running_cost = self.running_cost(state, current_input, reference[idx, :])
         # Integrate the dynamics
         state_next = self.model.integrate_rollout(state, current_input, self.dt)
         return running_cost, state_next
@@ -230,7 +230,7 @@ class SbMPC:
         ----------
         state : jnp.array
             The current state of the robot for feedback
-        reference : jnp.array
+        reference
             The desired state of the robot
         shift_guess : bool (default = True)
             Determines if the resulting control action is stored in a shifted version of the control variables
@@ -241,6 +241,9 @@ class SbMPC:
         optimal_action : jnp.array
             The optimal input trajectory shaped (num_control_variables, )
         """
+
+        if reference.ndim == 1:
+            reference = jnp.tile(reference, (self.horizon, 1))
 
         best_control_vars = self.best_control_vars
         # maybe this loop should be jitted to actually be more efficient

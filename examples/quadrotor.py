@@ -75,7 +75,7 @@ def quadrotor_dynamics(state: jnp.array, inputs: jnp.array) -> jnp.array:
 class Objective(BaseObjective):
     """ Cost function for the Quadrotor regulation task"""
 
-    def compute_state_error(self, state: jnp.array, state_ref: jnp.array) -> jnp.array:
+    def compute_state_error(self, state: jnp.array, state_ref : jnp.array) -> jnp.array:
         pos_err = state[0:3] - state_ref[0:3]
         att_err = quat_product(quat_inverse(state[3:7]), state_ref[3:7])[1:4]
         vel_err = state[7:10] - state_ref[7:10]
@@ -83,16 +83,18 @@ class Objective(BaseObjective):
 
         return pos_err, att_err, vel_err, ang_vel_err
 
-    def running_cost(self, state: jnp.array, state_ref: jnp.array, inputs: jnp.array) -> jnp.float32:
+    def running_cost(self, state: jnp.array, inputs: jnp.array, reference) -> jnp.float32:
+        state_ref = reference[:13]
+        input_ref = reference[13:]
         pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, state_ref)
         return (10 * pos_err.transpose() @ pos_err +
                 0.01 * att_err.transpose() @ att_err +
                 0.5 * vel_err.transpose() @ vel_err +
                 0.1 * ang_vel_err.transpose() @ ang_vel_err +
-                (inputs-input_hover).transpose() @ jnp.diag(jnp.array([0.1, 0.1, 0.1, 0.5])) @ (inputs-input_hover) )
+                (inputs-input_ref).transpose() @ jnp.diag(jnp.array([0.1, 0.1, 0.1, 0.5])) @ (inputs-input_ref))
 
-    def final_cost(self, state, state_ref):
-        pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, state_ref)
+    def final_cost(self, state, reference):
+        pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, reference[:13])
         return (100 * pos_err.transpose() @ pos_err +
                 0.1 * att_err.transpose() @ att_err +
                 5 * vel_err.transpose() @ vel_err +
@@ -106,9 +108,11 @@ class Simulation(simulation.Simulator):
     def update(self):
         q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
         x_des = jnp.concatenate([q_des, jnp.zeros(self.model.nv, dtype=jnp.float32)], axis=0)
+
+        reference = jnp.concatenate((x_des, input_hover))
         # Compute the optimal input sequence
         time_start = time.time_ns()
-        input_sequence = self.controller.compute_control_action(self.current_state_vec(), x_des, num_steps=1).block_until_ready()
+        input_sequence = self.controller.compute_control_action(self.current_state_vec(), reference, num_steps=1).block_until_ready()
         print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
         ctrl = input_sequence[:self.model.nu]
 
@@ -143,8 +147,10 @@ if __name__ == "__main__":
 
     solver = SbMPC(system, Objective(), mpc_config, gen_config)
 
+    reference = jnp.concatenate((x_init, input_hover))
+
     # dummy for jitting
-    input_sequence = solver.compute_control_action(x_init, x_init).block_until_ready()
+    input_sequence = solver.compute_control_action(x_init, reference).block_until_ready()
 
     # Setup and run the simulation
     sim = Simulation(state_init, system, solver, 500)
