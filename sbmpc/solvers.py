@@ -1,5 +1,6 @@
 from sbmpc.model import BaseModel, ModelMjx, Model
 from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
+from sbmpc.utils.filter import MovingAverage
 
 import jax.numpy as jnp
 import jax
@@ -56,6 +57,13 @@ class SbMPC:
         self.clip_input = jax.jit(clip_input_vectorized, device=config_general.device)
 
         self.std_dev_horizon = jnp.tile(config_mpc.std_dev_mppi, self.horizon)
+
+        window_size = 3
+        left_padding = window_size // 2
+
+        self.last_inputs_window = jnp.tile(config_mpc.initial_guess, left_padding)
+
+        self.moving_average = MovingAverage(window_size=window_size, step_size=model.nu)
 
         self.master_key = jax.random.PRNGKey(420)
         self.initial_random_parameters = jnp.zeros((self.num_parallel_computations, self.num_control_variables),
@@ -179,19 +187,20 @@ class SbMPC:
         num_sample_gaussian_1 = self.num_parallel_computations - 1
 
         # Multivariate sampling with different standard deviation for the different inputs (slower implementation)
-        # sampled_variation = jax.random.multivariate_normal(key,
+        # sampled_variation = self.moving_average.filter_batch(jax.random.multivariate_normal(key,
         #                                                    mean=jnp.zeros(self.model.nu),
         #                                                    cov=self.sigma_mppi,
         #                                                    shape=(num_sample_gaussian_1, self.horizon)).reshape(
-        #     num_sample_gaussian_1, self.num_control_variables)
+        #     num_sample_gaussian_1, self.num_control_variables))
 
-        sampled_variation = jax.random.normal(key=key,
-                                              shape=(num_sample_gaussian_1, self.num_control_variables)) * self.std_dev_horizon
+        sampled_variation = jax.random.normal(key=key, shape=(num_sample_gaussian_1, self.num_control_variables)) * self.std_dev_horizon
 
         additional_random_parameters = additional_random_parameters.at[1:self.num_parallel_computations].set(sampled_variation)
 
         # Compute the candidate control sequences considering input constraints
-        control_vars_all = self.clip_input(best_control_vars + additional_random_parameters)
+        control_vars_all = self.moving_average.filter_batch(self.clip_input(best_control_vars + additional_random_parameters),
+                                                            self.last_inputs_window,
+                                                            jnp.array(()))
         additional_random_parameters_clipped = control_vars_all - best_control_vars
 
         # Do rollout
@@ -244,9 +253,15 @@ class SbMPC:
             self.update_key()
 
         if shift_guess:
+            self.last_inputs_window = jnp.roll(self.last_inputs_window, shift=-self.model.nu, axis=0)
+            self.last_inputs_window = self.last_inputs_window.at[-self.model.nu:].set(
+                best_control_vars[:self.model.nu])
             self.best_control_vars = jnp.roll(best_control_vars, shift=-self.model.nu, axis=0)
-            self.best_control_vars = self.best_control_vars.at[-1*self.model.nu:].set(self.best_control_vars[-2*self.model.nu:-1*self.model.nu])
+            self.best_control_vars = self.best_control_vars.at[-self.model.nu:].set(self.best_control_vars[-2*self.model.nu:-self.model.nu])
+
         else:
+            self.last_inputs_window = self.last_inputs_window.at[-self.model.nu:].set(
+                best_control_vars[:self.model.nu])
             self.best_control_vars = best_control_vars
 
         return best_control_vars

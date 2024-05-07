@@ -78,13 +78,6 @@ x_init = jnp.concatenate([q_init, jnp.zeros(model_classic.nv, dtype=jnp.float32)
 integ_mjx_batch = jax.jit(jax.vmap(model_mjx.integrate, in_axes=(None, 0, None)))
 
 print(model_mjx.data.qpos, type(model_mjx.data.qpos), model_mjx.data.qpos.devices())
-# batch_size = 1
-#
-# state_batch = jnp.tile(x_init, (batch_size, 1))
-# input_batch = jax.random.uniform(jax.random.PRNGKey(0), shape=(batch_size, 4), dtype=jnp.float32, minval=-1., maxval=1.)
-
-
-
 
 batch_sizes = [10, 100, 1000, 10000, 100000]
 

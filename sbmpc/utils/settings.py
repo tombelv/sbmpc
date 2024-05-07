@@ -14,7 +14,10 @@ class ConfigMPC:
         self.horizon = horizon
         self.num_parallel_computations = num_parallel_computations
 
-        self.initial_guess = initial_guess
+        if initial_guess is None:
+            self.initial_guess = 0.0*std_dev_mppi
+        else:
+            self.initial_guess = initial_guess
 
         self.std_dev_mppi = std_dev_mppi
 

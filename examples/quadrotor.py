@@ -15,7 +15,7 @@ from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
 from sbmpc.utils.geometry import skew, quat_product, quat2rotm, quat_inverse
 import sbmpc.utils.simulation as simulation
 
-MODEL = "mjx"
+MODEL = "classic"
 
 input_max = jnp.array([1, 2.5, 2.5, 2])
 input_min = jnp.array([0, -2.5, -2.5, -2])
@@ -89,7 +89,7 @@ class Objective(BaseObjective):
                 0.01 * att_err.transpose() @ att_err +
                 0.5 * vel_err.transpose() @ vel_err +
                 0.1 * ang_vel_err.transpose() @ ang_vel_err +
-                (inputs-input_hover).transpose() @ jnp.diag(jnp.array([1, 0.1, 0.1, 0.5])) @ (inputs-input_hover) )
+                (inputs-input_hover).transpose() @ jnp.diag(jnp.array([0.1, 0.1, 0.1, 0.5])) @ (inputs-input_hover) )
 
     def final_cost(self, state, state_ref):
         pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, state_ref)
@@ -156,6 +156,7 @@ if __name__ == "__main__":
     plt.show()
     plt.plot(sim.state_traj[:, 0:3])
     plt.legend(["x", "y", "z"])
+    plt.grid()
     plt.show()
     # Plot the input trajectory
     plt.plot(sim.input_traj)
