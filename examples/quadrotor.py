@@ -15,7 +15,7 @@ from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
 from sbmpc.utils.geometry import skew, quat_product, quat2rotm, quat_inverse
 import sbmpc.utils.simulation as simulation
 
-MODEL = "classic"
+MODEL = "mjx"
 
 input_max = jnp.array([1, 2.5, 2.5, 2])
 input_min = jnp.array([0, -2.5, -2.5, -2])
@@ -124,7 +124,7 @@ if __name__ == "__main__":
     mpc_config = ConfigMPC(0.02,
                            25,
                            jnp.array([0.2, 0.3, 0.3, 0.15]),
-                           num_parallel_computations=10000,
+                           num_parallel_computations=2000,
                            initial_guess=input_hover)
     gen_config = ConfigGeneral("float32", jax.devices("gpu")[0])
 

@@ -1,5 +1,5 @@
 <mujoco model="cf2">
-  <option integrator="Euler" timestep="0.02" iterations="1" ls_iterations="5">
+  <option integrator="Euler" timestep="0.02" iterations="1" ls_iterations="5" solver="Newton">
     <flag eulerdamp="disable"/>
   </option>
 
