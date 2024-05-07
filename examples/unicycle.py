@@ -23,7 +23,7 @@ def unicycle_dynamics(state: jnp.array, inputs: jnp.array) -> jnp.array:
 
 
 class Objective(BaseObjective):
-    def running_cost(self, state: jnp.array, state_ref: jnp.array, inputs: jnp.array) -> jnp.float32:
+    def running_cost(self, state: jnp.array, inputs: jnp.array, state_ref: jnp.array) -> jnp.float32:
         """ Cost function to regulate the state to the desired value"""
         error = state - state_ref
         return 50 * jnp.linalg.norm(error, ord=2) + jnp.linalg.norm(inputs, ord=2)
