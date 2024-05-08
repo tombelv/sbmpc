@@ -243,7 +243,7 @@ class SbMPC:
         """
 
         if reference.ndim == 1:
-            reference = jnp.tile(reference, (self.horizon, 1))
+            reference = jnp.tile(reference, (self.horizon+1, 1))
 
         best_control_vars = self.best_control_vars
         # maybe this loop should be jitted to actually be more efficient
