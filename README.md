@@ -16,5 +16,6 @@ conda env create -f environment.yml
 - [ ] Control parametrization (splines etc)
 - [ ] Multivariate gaussian sampling 
 - [ ] Generic constraints
+- [ ] adding Adam for interfacing the library with any urdf 
 
 
