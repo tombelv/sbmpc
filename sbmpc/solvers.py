@@ -100,42 +100,42 @@ class SbMPC:
     def clip_input(self, control_variables):
         return jnp.clip(control_variables, self.input_min_full_horizon, self.input_max_full_horizon)
 
-    def compute_rollout(self, initial_state, reference, control_variables):
-        """
-        !!! As of now this only works for the classic model !!!
-
-        Calculate cost of a rollout of the dynamics given random control variables.
-        Parameters
-        ----------
-        initial_state : jnp.array
-            Initial state of the rollout.
-        reference : jnp.array
-            Desired state of the robot
-        control_variables
-            Vector of control inputs over the trajectory
-        Returns
-        -------
-        cost : float
-            cost of the rollout
-        """
-        def iterate_fun(idx, carry):
-            sum_cost, curr_state, reference = carry
-
-            current_input = jax.lax.dynamic_slice_in_dim(control_variables, idx * self.model.nu, self.model.nu)
-
-            running_cost = self.objective.running_cost(curr_state, current_input, reference[idx, :])
-
-            # Integrate the dynamics
-            state_next = self.model.integrate(curr_state, current_input, self.dt)
-
-            return sum_cost + running_cost, state_next, reference
-
-        carry = (jnp.float32(0.0), initial_state, reference)
-        cost, state, reference = jax.lax.fori_loop(0, self.horizon, iterate_fun, carry)
-
-        cost = cost + self.objective.final_cost(state, reference[self.horizon, :])
-
-        return cost
+    # def compute_rollout(self, initial_state, reference, control_variables):
+    #     """
+    #     !!! As of now this only works for the classic model !!!
+    #
+    #     Calculate cost of a rollout of the dynamics given random control variables.
+    #     Parameters
+    #     ----------
+    #     initial_state : jnp.array
+    #         Initial state of the rollout.
+    #     reference : jnp.array
+    #         Desired state of the robot
+    #     control_variables
+    #         Vector of control inputs over the trajectory
+    #     Returns
+    #     -------
+    #     cost : float
+    #         cost of the rollout
+    #     """
+    #     def iterate_fun(idx, carry):
+    #         sum_cost, curr_state, reference = carry
+    #
+    #         current_input = jax.lax.dynamic_slice_in_dim(control_variables, idx * self.model.nu, self.model.nu)
+    #
+    #         running_cost = self.objective.running_cost(curr_state, current_input, reference[idx, :])
+    #
+    #         # Integrate the dynamics
+    #         state_next = self.model.integrate(curr_state, current_input, self.dt)
+    #
+    #         return sum_cost + running_cost, state_next, reference
+    #
+    #     carry = (jnp.float32(0.0), initial_state, reference)
+    #     cost, state, reference = jax.lax.fori_loop(0, self.horizon, iterate_fun, carry)
+    #
+    #     cost = cost + self.objective.final_cost(state, reference[self.horizon, :])
+    #
+    #     return cost
 
     def compute_rollout_batched(self, initial_state, reference, control_variables):
 

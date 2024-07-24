@@ -77,8 +77,6 @@ x_init = jnp.concatenate([q_init, jnp.zeros(model_classic.nv, dtype=jnp.float32)
 # integ_classic_batch = jax.jit(jax.vmap(model_classic.integrate, in_axes=(None, 0, None)))
 integ_mjx_batch = jax.jit(jax.vmap(model_mjx.integrate, in_axes=(None, 0, None)))
 
-print(model_mjx.data.qpos, type(model_mjx.data.qpos), model_mjx.data.qpos.devices())
-
 batch_sizes = [10, 100, 1000, 10000, 100000]
 
 

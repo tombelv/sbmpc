@@ -48,10 +48,12 @@ class Model(BaseModel):
             self.integrate = self.integrate_euler
         elif integrator_type == "rk4":
             self.integrate = self.integrate_rk4
+        elif integrator_type == "custom_discrete":
+            self.integrate = model_dynamics
         else:
             raise ValueError("""
             Integrator type not supported.
-            Available types: si_euler, euler, rk4
+            Available types: si_euler, euler, rk4, custom_discrete
             """)
 
         integrate_vect = jax.vmap(self.integrate, in_axes=(0, 0, None))
@@ -117,8 +119,8 @@ class ModelMjx(BaseModel):
         return state_next
 
     def _integrate(self, state: jnp.ndarray, inputs: jnp.array, dt: float):
-        data = mjx.make_data(self.model)
-        data_next = data.replace(qpos=state[:self.model.nq], qvel=state[self.model.nq:], ctrl=inputs)
+        data_next = self.data
+        data_next = data_next.replace(qpos=state[:self.model.nq], qvel=state[self.model.nq:], ctrl=inputs)
         data_next = mjx.step(self.model, data_next)
         return jnp.concatenate([data_next.qpos, data_next.qvel])
 
