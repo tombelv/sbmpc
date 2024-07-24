@@ -51,11 +51,11 @@ class Simulation(simulation.Simulator):
 
 if __name__ == "__main__":
 
-    system = Model(unicycle_dynamics, 3, 0, 2, [input_min, input_max], integrator_type="rk4")
+    system = Model(unicycle_dynamics, nq=3, nv=0, nu=2, input_bounds=[input_min, input_max], integrator_type="rk4")
 
     x_init = jnp.array([2, 2, 0], dtype=jnp.float32)
 
-    mpc_config = ConfigMPC(0.02, 50, jnp.array([0.8, 0.75]), num_parallel_computations=5000)
+    mpc_config = ConfigMPC(dt=0.02, horizon=50, std_dev_mppi=jnp.array([0.8, 0.75]), num_parallel_computations=5000)
     gen_config = ConfigGeneral("float32", jax.devices("gpu")[0])
 
     solver = SbMPC(system, Objective(), mpc_config, gen_config)

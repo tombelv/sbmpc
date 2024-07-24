@@ -125,15 +125,15 @@ class Simulation(simulation.Simulator):
 
 if __name__ == "__main__":
 
-    mpc_config = ConfigMPC(0.02,
-                           25,
-                           jnp.array([0.2, 0.3, 0.3, 0.15]),
+    mpc_config = ConfigMPC(dt=0.02,  # Sampling time
+                           horizon=25,  # control horizon
+                           std_dev_mppi=jnp.array([0.2, 0.3, 0.3, 0.15]),  # input std dev
                            num_parallel_computations=2000,
                            initial_guess=input_hover)
     gen_config = ConfigGeneral("float32", jax.devices("gpu")[0])
 
     if MODEL == "classic":
-        system = Model(quadrotor_dynamics, 7, 6, 4, [input_min, input_max])
+        system = Model(quadrotor_dynamics, nq=7, nv=6, nu=4, input_bounds=[input_min, input_max])
         q_init = jnp.array([0.0, 0.0, 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
         x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
         state_init = x_init
