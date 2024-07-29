@@ -102,8 +102,8 @@ class Objective(BaseObjective):
 
 
 class Simulation(simulation.Simulator):
-    def __init__(self, initial_state, model, controller, num_iterations):
-        super().__init__(initial_state, model, controller, num_iterations)
+    def __init__(self, initial_state, model, controller, num_iterations, visualization):
+        super().__init__(initial_state, model, controller, num_iterations, visualization)
 
     def update(self):
         q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
@@ -134,11 +134,11 @@ if __name__ == "__main__":
 
     if MODEL == "classic":
         system = Model(quadrotor_dynamics, nq=7, nv=6, nu=4, input_bounds=[input_min, input_max])
-        q_init = jnp.array([0.0, 0.0, 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
+        q_init = jnp.array([0., 0., 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
         x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
         state_init = x_init
     elif MODEL == "mjx":
-        system = ModelMjx("bitcraze_crazyflie_2/cf2.xml")
+        system = ModelMjx("bitcraze_crazyflie_2/scene.xml")
         q_init = system.data.qpos
         x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
         state_init = system.data
@@ -153,7 +153,7 @@ if __name__ == "__main__":
     input_sequence = solver.compute_control_action(x_init, reference).block_until_ready()
 
     # Setup and run the simulation
-    sim = Simulation(state_init, system, solver, 500)
+    sim = Simulation(state_init, system, solver, 500, False)
     sim.simulate()
 
     ax = plt.figure().add_subplot(projection='3d')
