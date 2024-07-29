@@ -11,6 +11,9 @@ from abc import ABC, abstractmethod
 
 
 class BaseObjective(ABC):
+    def __init__(self, robot_model=None):
+        self.robot_model = robot_model
+
     @abstractmethod
     def running_cost(self, state, inputs, reference):
         pass
