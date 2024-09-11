@@ -14,6 +14,7 @@ from sbmpc.solvers import SbMPC, BaseObjective
 from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
 from sbmpc.utils.geometry import skew, quat_product, quat2rotm, quat_inverse
 import sbmpc.utils.simulation as simulation
+import sbmpc.utils.filter as fltr
 
 MODEL = "classic"
 
@@ -88,7 +89,7 @@ class Objective(BaseObjective):
         input_ref = reference[13:]
         pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, state_ref)
         return (10 * pos_err.transpose() @ pos_err +
-                0.01 * att_err.transpose() @ att_err +
+                0.1 * att_err.transpose() @ att_err +
                 0.5 * vel_err.transpose() @ vel_err +
                 0.1 * ang_vel_err.transpose() @ ang_vel_err +
                 (inputs-input_ref).transpose() @ jnp.diag(jnp.array([0.1, 0.1, 0.1, 0.5])) @ (inputs-input_ref))
@@ -96,7 +97,7 @@ class Objective(BaseObjective):
     def final_cost(self, state, reference):
         pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, reference[:13])
         return (100 * pos_err.transpose() @ pos_err +
-                0.1 * att_err.transpose() @ att_err +
+                1 * att_err.transpose() @ att_err +
                 5 * vel_err.transpose() @ vel_err +
                 1 * ang_vel_err.transpose() @ ang_vel_err)
 
@@ -112,7 +113,7 @@ class Simulation(simulation.Simulator):
         reference = jnp.concatenate((x_des, input_hover))
         # Compute the optimal input sequence
         time_start = time.time_ns()
-        input_sequence = self.controller.compute_control_action(self.current_state_vec(), reference, num_steps=1).block_until_ready()
+        input_sequence = self.controller.command(self.current_state_vec(), reference, num_steps=1).block_until_ready()
         print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
         ctrl = input_sequence[:self.model.nu]
 
@@ -130,6 +131,9 @@ if __name__ == "__main__":
                            std_dev_mppi=jnp.array([0.2, 0.3, 0.3, 0.15]),  # input std dev
                            num_parallel_computations=2000,
                            initial_guess=input_hover)
+    window_size = 3
+    mpc_config.filter = fltr.MovingAverage(window_size=window_size, step_size=4)
+
     gen_config = ConfigGeneral("float32", jax.devices("gpu")[0])
 
     if MODEL == "classic":
@@ -150,7 +154,7 @@ if __name__ == "__main__":
     reference = jnp.concatenate((x_init, input_hover))
 
     # dummy for jitting
-    input_sequence = solver.compute_control_action(x_init, reference).block_until_ready()
+    input_sequence = solver.command(x_init, reference).block_until_ready()
 
     # Setup and run the simulation
     sim = Simulation(state_init, system, solver, 500, False)

@@ -5,6 +5,7 @@ import mujoco.mjx as mjx
 import mujoco.viewer
 import time
 
+
 class Simulator:
     def __init__(self, initial_state, model, controller, num_iter=100, visualize=False):
         self.iter = 0

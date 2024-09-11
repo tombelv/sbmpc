@@ -15,6 +15,8 @@ class MovingAverage:
         self.filter = jax.jit(self._filter)
         self.filter_batch = jax.vmap(self._filter, in_axes=(0, None, None))
 
+        self.window_size = window_size
+
     def _filter(self, signal, left_padding, right_padding):
         signal_ = jnp.concatenate((left_padding, signal, right_padding))
         filtered = (convolve(signal_, self.kernel, mode='same') /

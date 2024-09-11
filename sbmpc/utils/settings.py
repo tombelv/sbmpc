@@ -21,4 +21,6 @@ class ConfigMPC:
 
         self.std_dev_mppi = std_dev_mppi
 
+        self.filter = None
+
 

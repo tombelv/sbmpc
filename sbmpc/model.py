@@ -132,7 +132,6 @@ class ModelMjx(BaseModel):
     def _integrate_kinematic(self, state: jnp.ndarray, inputs: jnp.array, dt: float):
         return state + dt * inputs
 
-
     def set_qpos(self, qpos):
         self.data = self.data.replace(qpos=qpos)
         self.mj_data.qpos = qpos

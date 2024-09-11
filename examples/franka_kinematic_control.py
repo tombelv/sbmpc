@@ -7,17 +7,15 @@ os.environ['XLA_FLAGS'] = (
         '--xla_gpu_triton_gemm_any=True '
     )
 
-import matplotlib.pyplot as plt
-
 from sbmpc.model import Model, ModelMjx
 from sbmpc.solvers import SbMPC, BaseObjective
 from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
-from sbmpc.utils.geometry import skew, quat_product, quat2rotm, quat_inverse
 import sbmpc.utils.simulation as simulation
+import sbmpc.utils.filter as fltr
 
 import mujoco.mjx as mjx
 import mujoco
-import mujoco.viewer
+
 
 class Objective(BaseObjective):
     def __init__(self, model):
@@ -50,7 +48,7 @@ class Simulation(simulation.Simulator):
         ee_des = jnp.array([-0.5, 0.4, 0.3], dtype=jnp.float32)  # hovering position
         reference = ee_des
         # Compute the optimal input sequence
-        input_sequence = self.controller.compute_control_action(self.current_state_vec(), reference, num_steps=1)
+        input_sequence = self.controller.command(self.current_state_vec(), reference, num_steps=1)
         ctrl = input_sequence[:self.model.nu]
 
         self.input_traj[self.iter, :] = ctrl
@@ -62,13 +60,15 @@ class Simulation(simulation.Simulator):
         print("EE position = ", self.controller.objective.compute_ee_pos(self.current_state))
 
 
-
 if __name__ == "__main__":
 
     mpc_config = ConfigMPC(dt=0.02,  # Sampling time
                            horizon=25,  # control horizon
                            std_dev_mppi=0.2*jnp.ones(7),  # input std dev
                            num_parallel_computations=2000)
+    window_size = 3
+    mpc_config.filter = fltr.MovingAverage(window_size=window_size, step_size=7)
+
     gen_config = ConfigGeneral("float32", jax.devices("gpu")[0])
 
     system = ModelMjx("franka_emika_panda/scene.xml", kinematic=True)
@@ -79,7 +79,7 @@ if __name__ == "__main__":
     solver = SbMPC(system, Objective(system), mpc_config, gen_config)
 
     # dummy for jitting
-    solver.compute_control_action(q_init, jnp.zeros(3)).block_until_ready()
+    solver.command(q_init, jnp.zeros(3)).block_until_ready()
 
     # Setup and run the simulation
     sim = Simulation(q_init, system, solver, 5000, visualize=True)
