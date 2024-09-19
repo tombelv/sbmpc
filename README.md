@@ -9,7 +9,7 @@ A generic sampling-based MPC python library based on jax.
 ## Instructions
 Create the conda environment with
 ```
-conda env create -f environment.yml
+mamba env create -f environment.yml
 ```
 
 # TODO
