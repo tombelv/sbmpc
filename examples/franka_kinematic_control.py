@@ -3,18 +3,18 @@ import time, os
 import jax
 import jax.numpy as jnp
 
+from sbmpc import  ModelMjx, SamplingBasedMPC, BaseObjective
+from sbmpc.settings import Config
+from sbmpc.simulation import Simulator
+from sbmpc.filter import MovingAverage
+
+import mujoco.mjx as mjx
+import mujoco
+
 os.environ['XLA_FLAGS'] = (
         '--xla_gpu_triton_gemm_any=True '
     )
 
-from sbmpc.model import Model, ModelMjx
-from sbmpc.solvers import SbMPC, BaseObjective
-from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
-import sbmpc.utils.simulation as simulation
-import sbmpc.utils.filter as fltr
-
-import mujoco.mjx as mjx
-import mujoco
 
 
 class Objective(BaseObjective):
@@ -40,7 +40,7 @@ class Objective(BaseObjective):
         return 100*((ee_pos - reference[:3]) ** 2).sum()
 
 
-class Simulation(simulation.Simulator):
+class Simulation(Simulator):
     def __init__(self, initial_state, model, controller, num_iterations, visualize):
         super().__init__(initial_state, model, controller, num_iterations, visualize)
 
@@ -62,21 +62,21 @@ class Simulation(simulation.Simulator):
 
 if __name__ == "__main__":
 
-    mpc_config = ConfigMPC(dt=0.02,  # Sampling time
-                           horizon=25,  # control horizon
-                           std_dev_mppi=0.2*jnp.ones(7),  # input std dev
-                           num_parallel_computations=2000)
-    window_size = 3
-    mpc_config.filter = fltr.MovingAverage(window_size=window_size, step_size=7)
+    config = Config()
+    config.MPC["dt"] = 0.02
+    config.MPC["horizon"] = 25
+    config.MPC["std_dev_mppi"] = 0.2*jnp.ones(7)
+    config.MPC["num_parallel_computations"] = 2000
 
-    gen_config = ConfigGeneral("float32", jax.devices("gpu")[0])
+    config.MPC["filter"] = MovingAverage(window_size=3, step_size=7)
+
 
     system = ModelMjx("franka_emika_panda/scene.xml", kinematic=True)
     system.set_qpos(system.mj_model.key_qpos[mujoco.mj_name2id(system.mj_model, mujoco.mjtObj.mjOBJ_KEY.value, "home")])
     q_init = system.data.qpos
     print("Initial configuration = ", q_init)
 
-    solver = SbMPC(system, Objective(system), mpc_config, gen_config)
+    solver = SamplingBasedMPC(system, Objective(system), config)
 
     # dummy for jitting
     solver.command(q_init, jnp.zeros(3)).block_until_ready()

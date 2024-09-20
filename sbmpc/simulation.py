@@ -51,7 +51,7 @@ class Simulator:
 
                 # viewer.cam.distance = 1.5
                 viewer.cam.lookat = (0, 0, 0.6)
-                while viewer.is_running():
+                while viewer.is_running() and self.iter < self.num_iter:
                     if not self.paused:
                         step_start = time.time()
 

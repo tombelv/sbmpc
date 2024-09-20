@@ -10,7 +10,7 @@ os.environ['XLA_FLAGS'] = (
 import matplotlib.pyplot as plt
 
 from sbmpc.model import Model, ModelMjx
-from sbmpc.utils.geometry import skew, quat_product, quat2rotm, quat_inverse
+from sbmpc.geometry import skew, quat_product, quat2rotm, quat_inverse
 
 input_max = jnp.array([1, 2.5, 2.5, 2])
 input_min = jnp.array([0, -2.5, -2.5, -2])

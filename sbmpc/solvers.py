@@ -1,11 +1,10 @@
-from sbmpc.model import BaseModel, ModelMjx, Model
-from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
-from sbmpc.utils.filter import MovingAverage
+from sbmpc.model import BaseModel
+from sbmpc.settings import Config
 
 import jax.numpy as jnp
 import jax
 
-import mujoco.mjx as mjx
+from functools import partial
 
 from abc import ABC, abstractmethod
 
@@ -22,11 +21,11 @@ class BaseObjective(ABC):
         return 0.0
 
 
-class SbMPC:
+class SamplingBasedMPC:
     """
     Sampling-based MPC solver.
     """
-    def __init__(self, model: BaseModel, objective: BaseObjective, config_mpc: ConfigMPC, config_general: ConfigGeneral):
+    def __init__(self, model: BaseModel, objective: BaseObjective, config: Config):
         """
         Initializes the solver with the model, the objective, configurations and initial guess.
         Parameters
@@ -37,51 +36,53 @@ class SbMPC:
             Required to compute the cost function in the rollout.
         config_mpc: ConfigMPC
             Contains the MPC related parameters such as the time horizon, number of samples, etc.
-        config_general: ConfigGeneral
-            Contains device and dtype config
         """
 
         self.model = model
         self.objective = objective
 
         # Sampling time for discrete time model
-        self.dt = config_mpc.dt
+        self.dt = config.MPC["dt"]
         # Control horizon of the MPC (steps)
-        self.horizon = config_mpc.horizon
+        self.horizon = config.MPC["horizon"]
         # Monte-carlo samples, that is the number of trajectories that are evaluated in parallel
-        self.num_parallel_computations = config_mpc.num_parallel_computations
+        self.num_parallel_computations = config.MPC["num_parallel_computations"]
         
         # Covariance of the input action
-        self.sigma_mppi = jnp.diag(config_mpc.std_dev_mppi**2)
+        self.sigma_mppi = jnp.diag(config.MPC["std_dev_mppi"]**2)
         
         # Total number of inputs over time (stored in a 1d vector)
         self.num_control_variables = model.nu * self.horizon
 
-        self.dtype_general = config_general.dtype_general
+        self.dtype_general = config.general["dtype"]
+        self.device = config.general["device"]
 
         self.input_max_full_horizon = jnp.tile(model.input_max, self.horizon)
         self.input_min_full_horizon = jnp.tile(model.input_min, self.horizon)
 
-        clip_input_vectorized = jax.vmap(self.clip_input, in_axes=0, out_axes=0)
-        self.clip_input = jax.jit(clip_input_vectorized, device=config_general.device)
+        self.clip_input = jax.jit(self.clip_input, device=self.device)
 
-        self.std_dev_horizon = jnp.tile(config_mpc.std_dev_mppi, self.horizon)
+        self.std_dev_horizon = jnp.tile(config.MPC["std_dev_mppi"], self.horizon)
 
-        self.filter = config_mpc.filter
-        if self.filter is not None:
-            self.last_inputs_window = jnp.tile(config_mpc.initial_guess, self.filter.window_size//2)
+        # Initialize the vector storing the current optimal input sequence
+        if config.MPC["initial_guess"] is None:
+            self.initial_guess = 0.0 * config.MPC["std_dev_mppi"]
+            self.best_control_vars = jnp.zeros((self.num_control_variables,), dtype=self.dtype_general)
         else:
-            self.last_inputs_window = jnp.tile(config_mpc.initial_guess, 1)
+            self.initial_guess = config.MPC["initial_guess"]
+            self.best_control_vars = jnp.tile(self.initial_guess, self.horizon)
+
+        self.filter = config.MPC["filter"]
+        if self.filter is not None:
+            self.last_inputs_window = jnp.tile(self.initial_guess, self.filter.window_size//2)
+        else:
+            self.last_inputs_window = jnp.tile(self.initial_guess, 1)
 
         self.master_key = jax.random.PRNGKey(420)
         self.initial_random_parameters = jnp.zeros((self.num_parallel_computations, self.num_control_variables),
                                                    dtype=self.dtype_general)
 
-        # Initialize the vector storing the current optimal input sequence
-        if config_mpc.initial_guess is None:
-            self.best_control_vars = jnp.zeros((self.num_control_variables,), dtype=self.dtype_general)
-        else:
-            self.best_control_vars = jnp.tile(config_mpc.initial_guess, self.horizon)
+
 
         # if isinstance(model, Model):
         #     self.batch_state = self._batch_state
@@ -94,21 +95,19 @@ class SbMPC:
 
         # self.vectorized_rollout = jax.vmap(self.compute_rollout, in_axes=(None, None, 0), out_axes=0)
         # self.jit_vectorized_rollout = jax.jit(self.vectorized_rollout, device=config_general.device)
-        self._rollout = jax.jit(self._rollout, device=config_general.device)
-
-        self._shift_guess = jax.jit(self._shift_guess, device=jax.devices("cpu")[0])
 
         # Jit the controller function
-        self.jit_compute_control_mppi = jax.jit(self.compute_control_mppi, device=config_general.device)
+        self.jit_compute_control_mppi = jax.jit(self.compute_control_mppi, device=self.device)
 
-        self.control_sens = jax.jit(jax.jacfwd(self.compute_control_mppi, argnums=0), device=config_general.device)
+        # self.control_sens = jax.jit(jax.jacfwd(self.compute_control_mppi, argnums=0), device=config_general.device)
 
-        running_cost_vec = jax.vmap(self.objective.running_cost, in_axes=(0, 0, None), out_axes=0)
-        self.running_cost = jax.jit(running_cost_vec, device=config_general.device)
+        self.running_cost = jax.jit(jax.vmap(self.objective.running_cost, in_axes=(0, 0, None), out_axes=0),
+                                    device=self.device)
 
-        final_cost_vec = jax.vmap(self.objective.final_cost, in_axes=(0, None), out_axes=0)
-        self.final_cost = jax.jit(final_cost_vec, device=config_general.device)
+        self.final_cost = jax.jit(jax.vmap(self.objective.final_cost, in_axes=(0, None), out_axes=0),
+                                  device=self.device)
 
+    @partial(jax.vmap, in_axes=(None, 0), out_axes=0)
     def clip_input(self, control_variables):
         return jnp.clip(control_variables, self.input_min_full_horizon, self.input_max_full_horizon)
 
@@ -270,7 +269,6 @@ class SbMPC:
 
         if shift_guess:
             self.last_inputs_window, self.best_control_vars = self._shift_guess(self.last_inputs_window, best_control_vars)
-
         else:
             self.last_inputs_window = self.last_inputs_window.at[-self.model.nu:].set(
                 best_control_vars[:self.model.nu])
@@ -322,6 +320,7 @@ class SbMPC:
         state = jnp.tile(state, (self.num_parallel_computations, 1))
         return state
 
+    @partial(jax.jit, static_argnums=(0,), device=jax.devices("cpu")[0])
     def _shift_guess(self, last_inputs_window, best_control_vars):
         last_inputs_window_new = jnp.roll(last_inputs_window, shift=-self.model.nu, axis=0)
         last_inputs_window_new = last_inputs_window_new.at[-self.model.nu:].set(

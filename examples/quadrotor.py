@@ -3,20 +3,19 @@ import time, os
 import jax
 import jax.numpy as jnp
 
+import matplotlib.pyplot as plt
+
+from sbmpc import Model, ModelMjx, SamplingBasedMPC, BaseObjective
+from sbmpc.settings import Config
+from sbmpc.simulation import Simulator
+from sbmpc.geometry import skew, quat_product, quat2rotm, quat_inverse
+from sbmpc.filter import MovingAverage
+
 os.environ['XLA_FLAGS'] = (
         '--xla_gpu_triton_gemm_any=True '
     )
 
-import matplotlib.pyplot as plt
-
-from sbmpc.model import Model, ModelMjx
-from sbmpc.solvers import SbMPC, BaseObjective
-from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
-from sbmpc.utils.geometry import skew, quat_product, quat2rotm, quat_inverse
-import sbmpc.utils.simulation as simulation
-import sbmpc.utils.filter as fltr
-
-MODEL = "classic"
+MODEL = "mjx"
 
 input_max = jnp.array([1, 2.5, 2.5, 2])
 input_min = jnp.array([0, -2.5, -2.5, -2])
@@ -102,7 +101,7 @@ class Objective(BaseObjective):
                 1 * ang_vel_err.transpose() @ ang_vel_err)
 
 
-class Simulation(simulation.Simulator):
+class Simulation(Simulator):
     def __init__(self, initial_state, model, controller, num_iterations, visualization):
         super().__init__(initial_state, model, controller, num_iterations, visualization)
 
@@ -126,15 +125,15 @@ class Simulation(simulation.Simulator):
 
 if __name__ == "__main__":
 
-    mpc_config = ConfigMPC(dt=0.02,  # Sampling time
-                           horizon=25,  # control horizon
-                           std_dev_mppi=jnp.array([0.2, 0.3, 0.3, 0.15]),  # input std dev
-                           num_parallel_computations=2000,
-                           initial_guess=input_hover)
-    window_size = 3
-    mpc_config.filter = fltr.MovingAverage(window_size=window_size, step_size=4)
+    config = Config()
+    config.MPC["dt"] = 0.02
+    config.MPC["horizon"] = 25
+    config.MPC["std_dev_mppi"] = jnp.array([0.2, 0.3, 0.3, 0.15])
+    config.MPC["num_parallel_computations"] = 2000
+    config.MPC["initial_guess"] = input_hover
 
-    gen_config = ConfigGeneral("float32", jax.devices("gpu")[0])
+    config.MPC["filter"] = MovingAverage(window_size=3, step_size=4)
+
 
     if MODEL == "classic":
         system = Model(quadrotor_dynamics, nq=7, nv=6, nu=4, input_bounds=[input_min, input_max])
@@ -149,7 +148,7 @@ if __name__ == "__main__":
     else:
         raise ValueError("Model must be either 'classic' or 'mjx'")
 
-    solver = SbMPC(system, Objective(), mpc_config, gen_config)
+    solver = SamplingBasedMPC(system, Objective(), config)
 
     reference = jnp.concatenate((x_init, input_hover))
 

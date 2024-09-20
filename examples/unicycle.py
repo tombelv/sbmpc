@@ -5,11 +5,10 @@ import jax.numpy as jnp
 
 import matplotlib.pyplot as plt
 
-from sbmpc.model import Model
-from sbmpc.solvers import SbMPC, BaseObjective
-from sbmpc.utils.settings import ConfigMPC, ConfigGeneral
-import sbmpc.utils.simulation as simulation
-import sbmpc.utils.filter as fltr
+from sbmpc import Model, SamplingBasedMPC, BaseObjective
+from sbmpc.settings import Config
+from sbmpc.simulation import Simulator
+from sbmpc.filter import MovingAverage
 
 
 input_max = jnp.array([2, 4])
@@ -35,7 +34,7 @@ class Objective(BaseObjective):
         return 500 * jnp.linalg.norm(error, ord=2)
 
 
-class Simulation(simulation.Simulator):
+class Simulation(Simulator):
     def __init__(self, initial_state, model, controller, num_iterations):
         super().__init__(initial_state, model, controller, num_iterations)
 
@@ -60,13 +59,15 @@ if __name__ == "__main__":
 
     x_init = jnp.array([2, 2, 0], dtype=jnp.float32)
 
-    mpc_config = ConfigMPC(dt=0.02, horizon=50, std_dev_mppi=jnp.array([0.8, 0.75]), num_parallel_computations=5000)
-    window_size = 3
-    mpc_config.filter = fltr.MovingAverage(window_size=window_size, step_size=system.nu)
+    config = Config()
+    config.MPC["dt"] = 0.02
+    config.MPC["horizon"] = 50
+    config.MPC["std_dev_mppi"] = jnp.array([0.8, 0.75])
+    config.MPC["num_parallel_computations"] = 5000
 
-    gen_config = ConfigGeneral("float32", jax.devices("gpu")[0])
+    config.MPC["filter"] = MovingAverage(window_size=3, step_size=system.nu)
 
-    solver = SbMPC(system, Objective(), mpc_config, gen_config)
+    solver = SamplingBasedMPC(system, Objective(), config)
 
     # Setup and run the simulation
     sim = Simulation(x_init, system, solver, 500)
