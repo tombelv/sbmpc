@@ -1,13 +1,13 @@
 import jax
 import jax.numpy as jnp
 
-
+# Deprecated, not used now
 class ConfigGeneral:
     def __init__(self, dtype_general, device: jax.Device):
         self.dtype_general = dtype_general
         self.device = device
 
-
+# Deprecated, not used now
 class ConfigMPC:
     def __init__(self, dt: float, horizon: int, std_dev_mppi: jnp.array, num_parallel_computations: int = 10000,
                  initial_guess=None):
@@ -33,4 +33,5 @@ class Config:
                     "num_parallel_computations": 1000,
                     "std_dev_mppi": None,
                     "initial_guess": None,
-                    "filter": None}
+                    "filter": None,
+                    "gains": False}

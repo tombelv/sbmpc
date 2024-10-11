@@ -82,8 +82,6 @@ class SamplingBasedMPC:
         self.initial_random_parameters = jnp.zeros((self.num_parallel_computations, self.num_control_variables),
                                                    dtype=self.dtype_general)
 
-
-
         # if isinstance(model, Model):
         #     self.batch_state = self._batch_state
         # elif isinstance(model, ModelMjx):
@@ -99,7 +97,9 @@ class SamplingBasedMPC:
         # Jit the controller function
         self.jit_compute_control_mppi = jax.jit(self.compute_control_mppi, device=self.device)
 
-        # self.control_sens = jax.jit(jax.jacfwd(self.compute_control_mppi, argnums=0), device=config_general.device)
+        self.compute_gains = config.MPC["gains"]
+        self.gains = jnp.zeros((model.nu, model.nx))
+        self.ctrl_sens_to_state = jax.jit(jax.jacfwd(self.compute_control_mppi, argnums=0), device=self.device)
 
         self.running_cost = jax.jit(jax.vmap(self.objective.running_cost, in_axes=(0, 0, None), out_axes=0),
                                     device=self.device)
@@ -232,7 +232,7 @@ class SamplingBasedMPC:
             (self.num_parallel_computations, self.num_control_variables, 1))
         best_control_vars += jnp.sum(weighted_inputs, axis=0).reshape((self.num_control_variables,))
 
-        return best_control_vars#, best_cost, costs
+        return best_control_vars
 
     def command(self, state, reference, shift_guess=True, num_steps=1):
         """
@@ -264,7 +264,9 @@ class SamplingBasedMPC:
                                                                     reference,
                                                                     best_control_vars,
                                                                     self.master_key)
-            # grad = self.control_sens(state, reference, best_control_vars, self.master_key)
+            if self.compute_gains:
+                self.gains = self.ctrl_sens_to_state(state, reference, best_control_vars, self.master_key)[:self.model.nu, :]
+
             self._update_key()
 
         if shift_guess:

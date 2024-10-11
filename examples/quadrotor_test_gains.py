@@ -15,7 +15,6 @@ os.environ['XLA_FLAGS'] = (
         '--xla_gpu_triton_gemm_any=True '
     )
 
-MODEL = "mjx"
 
 input_max = jnp.array([1, 2.5, 2.5, 2])
 input_min = jnp.array([0, -2.5, -2.5, -2])
@@ -134,18 +133,12 @@ if __name__ == "__main__":
 
     config.MPC["filter"] = MovingAverage(window_size=3, step_size=4)  # step_size is the number of inputs
 
-    if MODEL == "classic":
-        system = Model(quadrotor_dynamics, nq=7, nv=6, nu=4, input_bounds=[input_min, input_max])
-        q_init = jnp.array([0., 0., 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
-        x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
-        state_init = x_init
-    elif MODEL == "mjx":
-        system = ModelMjx("bitcraze_crazyflie_2/scene.xml")
-        q_init = system.data.qpos
-        x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
-        state_init = system.data
-    else:
-        raise ValueError("Model must be either 'classic' or 'mjx'")
+    config.MPC["gains"] = True
+
+    system = Model(quadrotor_dynamics, nq=7, nv=6, nu=4, input_bounds=[input_min, input_max])
+    q_init = jnp.array([0., 0., 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
+    x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
+    state_init = x_init
 
     solver = SamplingBasedMPC(system, Objective(), config)
 
