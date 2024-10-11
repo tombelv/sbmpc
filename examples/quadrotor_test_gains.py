@@ -14,7 +14,8 @@ from sbmpc.filter import MovingAverage
 os.environ['XLA_FLAGS'] = (
         '--xla_gpu_triton_gemm_any=True '
     )
-
+# Needed to remove warnings, to be investigated
+jax.config.update("jax_default_matmul_precision", "high")
 
 input_max = jnp.array([1, 2.5, 2.5, 2])
 input_min = jnp.array([0, -2.5, -2.5, -2])
@@ -87,16 +88,16 @@ class Objective(BaseObjective):
         input_ref = reference[13:]
         pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, state_ref)
         return (10 * pos_err.transpose() @ pos_err +
-                0.1 * att_err.transpose() @ att_err +
-                0.5 * vel_err.transpose() @ vel_err +
-                0.1 * ang_vel_err.transpose() @ ang_vel_err +
+                1 * att_err.transpose() @ att_err +
+                5 * vel_err.transpose() @ vel_err +
+                1 * ang_vel_err.transpose() @ ang_vel_err +
                 (inputs-input_ref).transpose() @ jnp.diag(jnp.array([0.1, 0.1, 0.1, 0.5])) @ (inputs-input_ref))
 
     def final_cost(self, state, reference):
         pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, reference[:13])
         return (100 * pos_err.transpose() @ pos_err +
-                1 * att_err.transpose() @ att_err +
-                5 * vel_err.transpose() @ vel_err +
+                50 * att_err.transpose() @ att_err +
+                50 * vel_err.transpose() @ vel_err +
                 1 * ang_vel_err.transpose() @ ang_vel_err)
 
 
@@ -104,16 +105,16 @@ class Simulation(Simulator):
     def __init__(self, initial_state, model, controller, num_iterations, visualization):
         super().__init__(initial_state, model, controller, num_iterations, visualization)
 
+        self.gain_matrix = jnp.zeros((4, 13))
+        self.input_ff = jnp.zeros(4)
+
     def update(self):
-        q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
+        q_des = jnp.array([0.05, 0.0, 0.1, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
         x_des = jnp.concatenate([q_des, jnp.zeros(self.model.nv, dtype=jnp.float32)], axis=0)
 
-        reference = jnp.concatenate((x_des, input_hover))
-        # Compute the optimal input sequence
         time_start = time.time_ns()
-        input_sequence = self.controller.command(self.current_state_vec(), reference, num_steps=1).block_until_ready()
+        ctrl = input_hover + self.gain_matrix @ (self.current_state_vec() - x_des)
         print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
-        ctrl = input_sequence[:self.model.nu]
 
         self.input_traj[self.iter, :] = ctrl
 
@@ -144,11 +145,12 @@ if __name__ == "__main__":
 
     reference = jnp.concatenate((x_init, input_hover))
 
-    # dummy for jitting
     input_sequence = solver.command(x_init, reference).block_until_ready()
 
     # Setup and run the simulation
     sim = Simulation(state_init, system, solver, 500, False)
+    sim.gain_matrix = solver.gains
+    sim.input_ff = input_sequence[:system.nu]
     sim.simulate()
 
     ax = plt.figure().add_subplot(projection='3d')
