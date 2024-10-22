@@ -11,11 +11,11 @@ from sbmpc.simulation import Simulator
 from sbmpc.geometry import skew, quat_product, quat2rotm, quat_inverse
 from sbmpc.filter import MovingAverage
 
-os.environ['XLA_FLAGS'] = (
-        '--xla_gpu_triton_gemm_any=True '
-    )
+os.environ['XLA_FLAGS'] = '--xla_gpu_triton_gemm_any=True'
+# Needed to remove warnings, to be investigated
+jax.config.update("jax_default_matmul_precision", "high")
 
-MODEL = "mjx"
+MODEL = "classic"
 
 input_max = jnp.array([1, 2.5, 2.5, 2])
 input_min = jnp.array([0, -2.5, -2.5, -2])
@@ -128,11 +128,15 @@ if __name__ == "__main__":
     config = Config()
     config.MPC["dt"] = 0.02
     config.MPC["horizon"] = 25
-    config.MPC["std_dev_mppi"] = jnp.array([0.2, 0.3, 0.3, 0.15])
-    config.MPC["num_parallel_computations"] = 2000
+    config.MPC["std_dev_mppi"] = 0.1*jnp.array([0.2, 0.3, 0.3, 0.15])
+    config.MPC["num_parallel_computations"] = 500
     config.MPC["initial_guess"] = input_hover
 
-    config.MPC["filter"] = MovingAverage(window_size=3, step_size=4)  # step_size is the number of inputs
+    # config.MPC["filter"] = MovingAverage(window_size=3, step_size=4)  # step_size is the number of inputs
+    config.MPC["smoothing"] = "Spline"
+    config.MPC["num_control_points"] = 5
+
+    # config.MPC["gains"] = True
 
     if MODEL == "classic":
         system = Model(quadrotor_dynamics, nq=7, nv=6, nu=4, input_bounds=[input_min, input_max])

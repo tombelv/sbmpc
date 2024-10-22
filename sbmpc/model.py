@@ -24,6 +24,9 @@ class BaseModel(ABC):
     def integrate_rollout(self, state, inputs, dt):
         pass
 
+    def integrate_rollout_single(self, state, inputs, dt):
+        pass
+
 
 
 class Model(BaseModel):
@@ -55,6 +58,7 @@ class Model(BaseModel):
 
         integrate_vect = jax.vmap(self.integrate, in_axes=(0, 0, None))
         self.integrate_rollout = jax.jit(integrate_vect)
+        self.integrate_rollout_single = jax.jit(self.integrate)
 
 
 
@@ -86,6 +90,27 @@ class Model(BaseModel):
                     v_kp1])
 
 
+class ModelParametric(Model):
+    def __init__(self, model_dynamics_parametric,
+                 nq: int,
+                 nv: int,
+                 nu: int,
+                 nominal_params,
+                 input_bounds=(-jnp.inf, jnp.inf),
+                 integrator_type="si_euler"):
+        self.model_dynamics_parametric = model_dynamics_parametric
+
+        super().__init__(self.model_dynamics, nq, nv, nu, input_bounds, integrator_type)
+
+        self.nominal_params = nominal_params
+
+    def model_dynamics(self, state, inputs):
+        return self.model_dynamics_parametric(state, inputs, self.nominal_params)
+
+    def sensitivity_step(self, state, inputs, state_sensitivity, input_sensitivity):
+        sens_all = jax.jacfwd(self.model_dynamics_parametric)
+
+
 class ModelMjx(BaseModel):
     def __init__(self, model_path, kinematic=False, input_bounds=(-jnp.inf, jnp.inf)):
         self.model_path = model_path
@@ -111,10 +136,12 @@ class ModelMjx(BaseModel):
             integrate_vect = jax.vmap(self._integrate_kinematic, in_axes=(0, 0, None))
             self.integrate_rollout = jax.jit(integrate_vect)
             self.integrate = jax.jit(self._integrate_kinematic)
+            self.integrate_rollout_single = self.integrate
         else:
             integrate_vect = jax.vmap(self._integrate, in_axes=(0, 0, None))
             self.integrate_rollout = jax.jit(integrate_vect)
             self.integrate = jax.jit(self._integrate_mjx)
+            self.integrate_rollout_single = self._integrate
 
 
     # here we need to work on data that are already on the gpu

@@ -70,7 +70,6 @@ if __name__ == "__main__":
 
     config.MPC["filter"] = MovingAverage(window_size=3, step_size=7)
 
-
     system = ModelMjx("franka_emika_panda/scene.xml", kinematic=True)
     system.set_qpos(system.mj_model.key_qpos[mujoco.mj_name2id(system.mj_model, mujoco.mjtObj.mjOBJ_KEY.value, "home")])
     q_init = system.data.qpos
