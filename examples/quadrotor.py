@@ -114,7 +114,7 @@ class Simulation(Simulator):
         time_start = time.time_ns()
         input_sequence = self.controller.command(self.current_state_vec(), reference, num_steps=1).block_until_ready()
         print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
-        ctrl = input_sequence[:self.model.nu]
+        ctrl = input_sequence[0, :]
 
         self.input_traj[self.iter, :] = ctrl
 
@@ -132,7 +132,6 @@ if __name__ == "__main__":
     config.MPC["num_parallel_computations"] = 500
     config.MPC["initial_guess"] = input_hover
 
-    # config.MPC["filter"] = MovingAverage(window_size=3, step_size=4)  # step_size is the number of inputs
     config.MPC["smoothing"] = "Spline"
     config.MPC["num_control_points"] = 5
 
@@ -156,7 +155,7 @@ if __name__ == "__main__":
     reference = jnp.concatenate((x_init, input_hover))
 
     # dummy for jitting
-    input_sequence = solver.command(x_init, reference).block_until_ready()
+    input_sequence = solver.command(x_init, reference, False).block_until_ready()
 
     # Setup and run the simulation
     sim = Simulation(state_init, system, solver, 500, False)

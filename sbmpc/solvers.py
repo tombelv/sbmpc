@@ -58,26 +58,27 @@ class SamplingBasedMPC:
         
         # Total number of inputs over time (stored in a 1d vector)
         self.num_control_variables = model.nu * self.horizon
-        self.num_control_points = model.nu * config.MPC["num_control_points"]
+        self.num_control_points = config.MPC["num_control_points"]
         self.control_points_sparsity = self.horizon // config.MPC["num_control_points"]
 
         self.dtype_general = config.general["dtype"]
         self.device = config.general["device"]
 
-        self.input_max_full_horizon = jnp.tile(model.input_max, self.horizon)
-        self.input_min_full_horizon = jnp.tile(model.input_min, self.horizon)
+        self.input_max_full_horizon = jnp.tile(model.input_max, (self.horizon, 1))
+        self.input_min_full_horizon = jnp.tile(model.input_min, (self.horizon, 1))
 
         self.clip_input = jax.jit(self.clip_input, device=self.device)
 
-        self.std_dev_horizon = jnp.tile(config.MPC["std_dev_mppi"], config.MPC["num_control_points"])
+        self.std_dev = config.MPC["std_dev_mppi"]
+        self.std_dev_horizon = jnp.tile(config.MPC["std_dev_mppi"], self.num_control_points)
 
         # Initialize the vector storing the current optimal input sequence
         if config.MPC["initial_guess"] is None:
             self.initial_guess = 0.0 * config.MPC["std_dev_mppi"]
-            self.best_control_vars = jnp.zeros((self.num_control_variables,), dtype=self.dtype_general)
+            self.best_control_vars = jnp.zeros((self.horizon,self.model.nu), dtype=self.dtype_general)
         else:
             self.initial_guess = config.MPC["initial_guess"]
-            self.best_control_vars = jnp.tile(self.initial_guess, self.horizon)
+            self.best_control_vars = jnp.tile(self.initial_guess, (self.horizon, 1))
 
         self.filter = config.MPC["filter"]
         if self.filter is not None:
@@ -86,7 +87,7 @@ class SamplingBasedMPC:
             self.last_inputs_window = jnp.tile(self.initial_guess, 1)
 
         self.master_key = jax.random.PRNGKey(420)
-        self.initial_random_parameters = jnp.zeros((self.num_parallel_computations, self.num_control_points),
+        self.initial_random_parameters = jnp.zeros((self.num_parallel_computations, self.num_control_points, self.model.nu),
                                                    dtype=self.dtype_general)
 
         self.rollout = jax.vmap(self._rollout, in_axes=(None, None, 0), out_axes=(0, 0))
@@ -110,28 +111,26 @@ class SamplingBasedMPC:
         return jnp.clip(control_variables, self.input_min_full_horizon, self.input_max_full_horizon)
 
     def _rollout(self, initial_state, reference, control_variables):
-
         cost = 0
-
         curr_state = initial_state
-        input_sequence = jnp.zeros(self.num_control_variables, dtype=self.dtype_general)
+        input_sequence = jnp.zeros((self.horizon, self.model.nu), dtype=self.dtype_general)
         if self.config.MPC["smoothing"] == "Spline":
             control_interp = cubic_vmap(jnp.arange(0, self.horizon, self.control_points_sparsity),
-                                        control_variables.reshape(-1, self.model.nu).T,
+                                        control_variables.T,
                                         jnp.arange(0, self.horizon))
-            control_variables = self.clip_input_single(control_interp.T.reshape(self.num_control_variables))
+            control_variables = self.clip_input_single(control_interp.T)
 
         for idx in range(self.horizon):
             running_cost, curr_state, curr_input = self._rollout_step(curr_state, reference, control_variables, idx)
             cost += running_cost
-            input_sequence = input_sequence.at[idx * self.model.nu:(idx+1) * self.model.nu].set(curr_input)
+            input_sequence = input_sequence.at[idx, :].set(curr_input)
 
         cost += self.final_cost(curr_state, reference[self.horizon, :])
 
         return cost, input_sequence
 
     def _rollout_step(self, state, reference, control_variables, idx):
-        current_input = jax.lax.dynamic_slice_in_dim(control_variables, idx * self.model.nu, self.model.nu)
+        current_input = jax.lax.dynamic_slice(control_variables, (idx, 0), (1, self.model.nu)).reshape(-1)
         running_cost = self.running_cost(state, current_input, reference[idx, :])
         # Integrate the dynamics
         state_next = self.model.integrate_rollout_single(state, current_input, self.dt)
@@ -155,17 +154,10 @@ class SamplingBasedMPC:
         optimal_action : jnp.array
             The optimal input trajectory shaped (num_control_variables, )
         """
-
         additional_random_parameters = self.sample_input_sequence(key)
 
-        # Compute the candidate control sequences considering input constraints
-        if self.config.MPC["smoothing"] == "Filter":
-            control_vars_all = self.filter.filter_batch(self.clip_input(best_control_vars + additional_random_parameters),
-                                                        self.last_inputs_window,
-                                                        jnp.array(()))
-        elif self.config.MPC["smoothing"] == "Spline":
-            control_vars_all = (best_control_vars.reshape(self.horizon, self.model.nu)[::self.control_points_sparsity].reshape(-1)
-                                + additional_random_parameters)
+        if self.config.MPC["smoothing"] == "Spline":
+            control_vars_all = best_control_vars[::self.control_points_sparsity] + additional_random_parameters
         else:
             control_vars_all = best_control_vars + additional_random_parameters
 
@@ -183,7 +175,7 @@ class SamplingBasedMPC:
         weights = exp_costs / denom
         weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * additional_random_parameters_clipped.reshape(
             (self.num_parallel_computations, self.num_control_variables, 1))
-        best_control_vars += jnp.sum(weighted_inputs, axis=0).reshape((self.num_control_variables,))
+        best_control_vars += jnp.sum(weighted_inputs, axis=0).reshape((self.horizon, self.model.nu))
 
         return best_control_vars
 
@@ -223,10 +215,8 @@ class SamplingBasedMPC:
             self._update_key()
 
         if shift_guess:
-            self.last_inputs_window, self.best_control_vars = self._shift_guess(self.last_inputs_window, best_control_vars)
+            self.best_control_vars = self._shift_guess(best_control_vars)
         else:
-            self.last_inputs_window = self.last_inputs_window.at[-self.model.nu:].set(
-                best_control_vars[:self.model.nu])
             self.best_control_vars = best_control_vars
 
         return best_control_vars
@@ -266,15 +256,12 @@ class SamplingBasedMPC:
         self.master_key = newkey
 
     @partial(jax.jit, static_argnums=(0,), device=jax.devices("cpu")[0])
-    def _shift_guess(self, last_inputs_window, best_control_vars):
-        last_inputs_window_new = jnp.roll(last_inputs_window, shift=-self.model.nu, axis=0)
-        last_inputs_window_new = last_inputs_window_new.at[-self.model.nu:].set(
-            best_control_vars[:self.model.nu])
-        best_control_vars_shifted = jnp.roll(best_control_vars, shift=-self.model.nu, axis=0)
-        best_control_vars_shifted = best_control_vars_shifted.at[-self.model.nu:].set(
-            best_control_vars_shifted[-2 * self.model.nu:-self.model.nu])
+    def _shift_guess(self, best_control_vars):
+        best_control_vars_shifted = jnp.roll(best_control_vars, shift=-1, axis=0)
+        best_control_vars_shifted = best_control_vars_shifted.at[-1, :].set(
+            best_control_vars_shifted[-2:-1, :].reshape(-1))
 
-        return last_inputs_window_new, best_control_vars_shifted
+        return best_control_vars_shifted
 
     def sample_input_sequence(self, key):
         # Generate random parameters
@@ -284,10 +271,10 @@ class SamplingBasedMPC:
         # GAUSSIAN
         num_sample_gaussian_1 = self.num_parallel_computations - 1
 
-        sampled_variation_unit = jax.random.normal(key=key, shape=(num_sample_gaussian_1, self.num_control_points))
-        sampled_variation = sampled_variation_unit * self.std_dev_horizon
+        sampled_variation_unit = jax.random.normal(key=key, shape=(num_sample_gaussian_1, self.num_control_points, self.model.nu))
+        sampled_variation = sampled_variation_unit * self.std_dev
 
-        additional_random_parameters = additional_random_parameters.at[1:self.num_parallel_computations].set(
+        additional_random_parameters = additional_random_parameters.at[1:self.num_parallel_computations, :, :].set(
             sampled_variation)
 
         return additional_random_parameters
