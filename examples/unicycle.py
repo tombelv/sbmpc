@@ -16,7 +16,7 @@ input_min = -input_max
 
 
 @jax.jit
-def unicycle_dynamics(state: jnp.array, inputs: jnp.array) -> jnp.array:
+def unicycle_dynamics(state, inputs, params):
     state_dot = jnp.array([inputs[0] * jnp.cos(state[2]),
                            inputs[0] * jnp.sin(state[2]),
                            inputs[1]], dtype=jnp.float32)
