@@ -8,7 +8,7 @@ from functools import partial
 
 from abc import ABC, abstractmethod
 
-from sbmpc.filter import cubic_vmap
+from sbmpc.filter import cubic_spline_interpolation
 
 
 class BaseObjective(ABC):
@@ -21,6 +21,24 @@ class BaseObjective(ABC):
 
     def final_cost(self, state, reference):
         return 0.0
+
+    def cost_and_constraints(self, state, inputs, reference):
+        return self.running_cost(state, inputs, reference) + self.make_barrier(self.constraints(state, inputs, reference))
+
+    def final_cost_and_constraints(self, state, reference):
+        return self.final_cost(state, reference) + self.make_barrier(self.terminal_constraints(state, reference))
+
+    def make_barrier(self, constraint_array):
+        constraint_array = jnp.where(constraint_array > 0, 1e5, constraint_array)
+        constraint_array = jnp.where(constraint_array <= 0, 0.0, constraint_array)
+        return constraint_array
+
+    def constraints(self, state, inputs, reference):
+        return 0.0
+
+    def terminal_constraints(self, state, reference):
+        return 0.0
+
 
 
 class SamplingBasedMPC:
@@ -52,6 +70,8 @@ class SamplingBasedMPC:
         self.horizon = config.MPC["horizon"]
         # Monte-carlo samples, that is the number of trajectories that are evaluated in parallel
         self.num_parallel_computations = config.MPC["num_parallel_computations"]
+
+        self.lam = config.MPC["lambda"]
         
         # Covariance of the input action
         self.sigma_mppi = jnp.diag(config.MPC["std_dev_mppi"]**2)
@@ -99,9 +119,9 @@ class SamplingBasedMPC:
         self.gains = jnp.zeros((model.nu, model.nx))
         self.ctrl_sens_to_state = jax.jit(jax.jacfwd(self.compute_control_mppi, argnums=0), device=self.device)
 
-        self.running_cost = self.objective.running_cost
+        self.cost_and_constraints = self.objective.cost_and_constraints
 
-        self.final_cost = self.objective.final_cost
+        self.final_cost_and_constraints = self.objective.final_cost_and_constraints
 
     @partial(jax.vmap, in_axes=(None, 0), out_axes=0)
     def clip_input(self, control_variables):
@@ -115,26 +135,26 @@ class SamplingBasedMPC:
         curr_state = initial_state
         input_sequence = jnp.zeros((self.horizon, self.model.nu), dtype=self.dtype_general)
         if self.config.MPC["smoothing"] == "Spline":
-            control_interp = cubic_vmap(jnp.arange(0, self.horizon, self.control_points_sparsity),
-                                        control_variables.T,
+            control_interp = cubic_spline_interpolation(jnp.arange(0, self.horizon, self.control_points_sparsity),
+                                        control_variables,
                                         jnp.arange(0, self.horizon))
-            control_variables = self.clip_input_single(control_interp.T)
+            control_variables = self.clip_input_single(control_interp)
 
         for idx in range(self.horizon):
-            running_cost, curr_state, curr_input = self._rollout_step(curr_state, reference, control_variables, idx)
-            cost += running_cost
+            cost_and_constraints, curr_state, curr_input = self._rollout_step(curr_state, reference, control_variables, idx)
+            cost += cost_and_constraints
             input_sequence = input_sequence.at[idx, :].set(curr_input)
 
-        cost += self.final_cost(curr_state, reference[self.horizon, :])
+        cost += self.final_cost_and_constraints(curr_state, reference[self.horizon, :])
 
         return cost, input_sequence
 
     def _rollout_step(self, state, reference, control_variables, idx):
         current_input = jax.lax.dynamic_slice(control_variables, (idx, 0), (1, self.model.nu)).reshape(-1)
-        running_cost = self.running_cost(state, current_input, reference[idx, :])
+        cost_and_constraints = self.cost_and_constraints(state, current_input, reference[idx, :])
         # Integrate the dynamics
         state_next = self.model.integrate_rollout_single(state, current_input, self.dt)
-        return running_cost, state_next, current_input
+        return cost_and_constraints, state_next, current_input
 
     def compute_control_mppi(self, state, reference, best_control_vars, key):
         """
@@ -168,8 +188,8 @@ class SamplingBasedMPC:
 
         # Compute MPPI update
         costs, best_cost, worst_cost = self._sort_and_clip_costs(costs)
-        exp_costs = self._exp_costs_invariant(costs, best_cost, worst_cost)
-        # exp_costs = self._exp_costs_shifted(costs, best_cost)
+        # exp_costs = self._exp_costs_invariant(costs, best_cost, worst_cost)
+        exp_costs = self._exp_costs_shifted(costs, best_cost)
 
         denom = jnp.sum(exp_costs)
         weights = exp_costs / denom
@@ -210,7 +230,7 @@ class SamplingBasedMPC:
                                                                     best_control_vars,
                                                                     self.master_key)
             if self.compute_gains:
-                self.gains = self.ctrl_sens_to_state(state, reference, best_control_vars, self.master_key)[:self.model.nu, :]
+                self.gains = self.ctrl_sens_to_state(state, reference, best_control_vars, self.master_key)[0]
 
             self._update_key()
 
@@ -234,10 +254,7 @@ class SamplingBasedMPC:
         return costs, best_cost, worst_cost
 
     def _exp_costs_shifted(self, costs, best_cost):
-        lam = 1.
-        exp_costs = jnp.exp(- lam * (costs - best_cost))
-
-        return exp_costs
+        return jnp.exp(- self.lam * (costs - best_cost))
 
     def _exp_costs_invariant(self, costs, best_cost, worst_cost):
         """
@@ -245,6 +262,8 @@ class SamplingBasedMPC:
         G. Rizzi, J. J. Chung, A. Gawel, L. Ott, M. Tognon and R. Siegwart,
         "Robust Sampling-Based Control of Mobile Manipulators for Interaction With Articulated Objects,"
         in IEEE Transactions on Robotics, vol. 39, no. 3, pp. 1929-1946, June 2023, doi: 10.1109/TRO.2022.3233343.
+
+        Not used anymore ATM since it does not work with constraints (to be investigated)
         """
         h = 20.
         exp_costs = jnp.exp(- h * (costs - best_cost) / (worst_cost - best_cost))

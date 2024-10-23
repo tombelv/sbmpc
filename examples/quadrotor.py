@@ -88,7 +88,6 @@ class Objective(BaseObjective):
         input_ref = reference[13:]
         pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, state_ref)
         return (10 * pos_err.transpose() @ pos_err +
-                0.1 * att_err.transpose() @ att_err +
                 0.5 * vel_err.transpose() @ vel_err +
                 0.1 * ang_vel_err.transpose() @ ang_vel_err +
                 (inputs-input_ref).transpose() @ jnp.diag(jnp.array([0.1, 0.1, 0.1, 0.5])) @ (inputs-input_ref))
@@ -99,6 +98,9 @@ class Objective(BaseObjective):
                 1 * att_err.transpose() @ att_err +
                 5 * vel_err.transpose() @ vel_err +
                 1 * ang_vel_err.transpose() @ ang_vel_err)
+
+    def constraints(self, state, inputs, reference):
+        return state[0] - 0.4
 
 
 class Simulation(Simulator):
@@ -131,6 +133,8 @@ if __name__ == "__main__":
     config.MPC["std_dev_mppi"] = 0.1*jnp.array([0.2, 0.3, 0.3, 0.15])
     config.MPC["num_parallel_computations"] = 500
     config.MPC["initial_guess"] = input_hover
+
+    config.MPC["lambda"] = 2.0
 
     config.MPC["smoothing"] = "Spline"
     config.MPC["num_control_points"] = 5

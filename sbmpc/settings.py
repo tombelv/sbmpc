@@ -31,6 +31,7 @@ class Config:
         self.MPC = {"dt": 0.0,
                     "horizon": -1,
                     "num_parallel_computations": 1000,
+                    "lambda": 1.0,
                     "std_dev_mppi": None,
                     "initial_guess": None,
                     "filter": None,

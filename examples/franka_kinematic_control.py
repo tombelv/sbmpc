@@ -49,7 +49,7 @@ class Simulation(Simulator):
         reference = ee_des
         # Compute the optimal input sequence
         input_sequence = self.controller.command(self.current_state_vec(), reference, num_steps=1)
-        ctrl = input_sequence[:self.model.nu]
+        ctrl = input_sequence[0]
 
         self.input_traj[self.iter, :] = ctrl
 
@@ -64,11 +64,14 @@ if __name__ == "__main__":
 
     config = Config()
     config.MPC["dt"] = 0.02
-    config.MPC["horizon"] = 25
+    config.MPC["horizon"] = 50
     config.MPC["std_dev_mppi"] = 0.2*jnp.ones(7)
-    config.MPC["num_parallel_computations"] = 2000
+    config.MPC["num_parallel_computations"] = 1000
 
-    config.MPC["filter"] = MovingAverage(window_size=3, step_size=7)
+    config.MPC["lambda"] = 1
+
+    config.MPC["smoothing"] = "Spline"
+    config.MPC["num_control_points"] = 5
 
     system = ModelMjx("franka_emika_panda/scene.xml", kinematic=True)
     system.set_qpos(system.mj_model.key_qpos[mujoco.mj_name2id(system.mj_model, mujoco.mjtObj.mjOBJ_KEY.value, "home")])

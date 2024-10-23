@@ -1,3 +1,5 @@
+from functools import partial
+
 import jax.numpy as jnp
 import jax
 
@@ -59,6 +61,7 @@ class SavitzkyGolay:
         return convolve(self.m[::-1], y_, mode='valid')
 
 
+@partial(jax.vmap, in_axes=(None, 1, None), out_axes=1)
 def cubic_spline_interpolation(x, y, x_new):
     """
     Perform cubic spline interpolation.
@@ -111,5 +114,3 @@ def cubic_spline_interpolation(x, y, x_new):
 
     return jax.vmap(interpolate)(x_new)
 
-
-cubic_vmap = jax.vmap(cubic_spline_interpolation, in_axes=(None, 0, None))

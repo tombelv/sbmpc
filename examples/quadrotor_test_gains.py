@@ -128,11 +128,12 @@ if __name__ == "__main__":
     config = Config()
     config.MPC["dt"] = 0.02
     config.MPC["horizon"] = 25
-    config.MPC["std_dev_mppi"] = jnp.array([0.2, 0.3, 0.3, 0.15])
-    config.MPC["num_parallel_computations"] = 2000
+    config.MPC["std_dev_mppi"] = 0.2*jnp.array([0.2, 0.3, 0.3, 0.15])
+    config.MPC["num_parallel_computations"] = 1000
     config.MPC["initial_guess"] = input_hover
 
-    config.MPC["filter"] = MovingAverage(window_size=3, step_size=4)  # step_size is the number of inputs
+    config.MPC["smoothing"] = "Spline"
+    config.MPC["num_control_points"] = 5
 
     config.MPC["gains"] = True
 
