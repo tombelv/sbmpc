@@ -5,8 +5,9 @@ import jax.numpy as jnp
 
 from sbmpc import  ModelMjx, SamplingBasedMPC, BaseObjective
 from sbmpc.settings import Config
-from sbmpc.simulation import Simulator
+from sbmpc.simulation import Simulator, MujocoVisualizer, Visualizer
 from sbmpc.filter import MovingAverage
+from typing import Optional
 
 import mujoco.mjx as mjx
 import mujoco
@@ -41,8 +42,13 @@ class Objective(BaseObjective):
 
 
 class Simulation(Simulator):
-    def __init__(self, initial_state, model, controller, num_iterations, visualize):
-        super().__init__(initial_state, model, controller, num_iterations, visualize)
+    def __init__(self, initial_state, model, controller, nq: int, num_iterations: int, visualizer: Optional[Visualizer] = None):
+        super().__init__(initial_state, model, controller, nq, num_iterations, visualizer)
+
+
+    def run_kinematics(self):
+        mujoco.mj_kinematics(
+                            self.model.mj_model, self.model.mj_data)
 
     def update(self):
         ee_des = jnp.array([-0.5, 0.4, 0.3], dtype=jnp.float32)  # hovering position
@@ -56,6 +62,7 @@ class Simulation(Simulator):
         # Simulate the dynamics
         self.current_state = self.model.integrate(self.current_state, ctrl, self.controller.dt)
         self.state_traj[self.iter + 1, :] = self.current_state_vec()
+        self.run_kinematics()
 
         print("EE position = ", self.controller.objective.compute_ee_pos(self.current_state))
 
@@ -63,6 +70,7 @@ class Simulation(Simulator):
 if __name__ == "__main__":
 
     config = Config()
+    config.general["visualize"] = True
     config.MPC["dt"] = 0.02
     config.MPC["horizon"] = 25
     config.MPC["std_dev_mppi"] = 0.2*jnp.ones(7)
@@ -76,13 +84,17 @@ if __name__ == "__main__":
     q_init = system.data.qpos
     print("Initial configuration = ", q_init)
 
+    visualizer = None
+    if config.general["visualize"]:
+        visualizer = MujocoVisualizer(system.mj_model, system.mj_data)
+
     solver = SamplingBasedMPC(system, Objective(system), config)
 
     # dummy for jitting
     solver.command(q_init, jnp.zeros(3)).block_until_ready()
 
     # Setup and run the simulation
-    sim = Simulation(q_init, system, solver, 5000, visualize=True)
+    sim = Simulation(q_init, system, solver, len(q_init), 5000, visualizer=visualizer)
     sim.simulate()
 
 

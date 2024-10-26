@@ -1,4 +1,5 @@
 import time, os
+from typing import Optional
 
 import jax
 import jax.numpy as jnp
@@ -7,15 +8,16 @@ import matplotlib.pyplot as plt
 
 from sbmpc import Model, ModelMjx, SamplingBasedMPC, BaseObjective
 from sbmpc.settings import Config
-from sbmpc.simulation import Simulator
+from sbmpc.simulation import Simulator, MujocoVisualizer, Visualizer
 from sbmpc.geometry import skew, quat_product, quat2rotm, quat_inverse
 from sbmpc.filter import MovingAverage
+
 
 os.environ['XLA_FLAGS'] = (
         '--xla_gpu_triton_gemm_any=True '
     )
 
-MODEL = "mjx"
+MODEL = "classic"
 
 input_max = jnp.array([1, 2.5, 2.5, 2])
 input_min = jnp.array([0, -2.5, -2.5, -2])
@@ -102,8 +104,8 @@ class Objective(BaseObjective):
 
 
 class Simulation(Simulator):
-    def __init__(self, initial_state, model, controller, num_iterations, visualization):
-        super().__init__(initial_state, model, controller, num_iterations, visualization)
+    def __init__(self, initial_state, model, controller, nq: int, num_iterations: int, visualizer: Optional[Visualizer] = None):
+        super().__init__(initial_state, model, controller, nq, num_iterations, visualizer)
 
     def update(self):
         q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
@@ -126,6 +128,7 @@ class Simulation(Simulator):
 if __name__ == "__main__":
 
     config = Config()
+    config.general["visualize"] = True
     config.MPC["dt"] = 0.02
     config.MPC["horizon"] = 25
     config.MPC["std_dev_mppi"] = jnp.array([0.2, 0.3, 0.3, 0.15])
@@ -153,9 +156,23 @@ if __name__ == "__main__":
 
     # dummy for jitting
     input_sequence = solver.command(x_init, reference).block_until_ready()
+    visualizer = None
+    if config.general["visualize"]:
+        mj_model, mj_data = (None, None)
+        step_mujoco = True
+        if MODEL == "classic":
+            new_system = ModelMjx("bitcraze_crazyflie_2/scene.xml")
+            mj_model = new_system.mj_model
+            mj_data = new_system.mj_data
+        elif MODEL == "mjx":
+            mj_model = system.mj_model
+            mj_data = system.mj_data
+        else:
+            raise ValueError
+        visualizer = MujocoVisualizer(mj_model, mj_data, step_mujoco=step_mujoco)
 
     # Setup and run the simulation
-    sim = Simulation(state_init, system, solver, 500, False)
+    sim = Simulation(state_init, system, solver, len(q_init), 500, visualizer)
     sim.simulate()
 
     ax = plt.figure().add_subplot(projection='3d')
