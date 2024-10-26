@@ -1,4 +1,5 @@
 import time, os
+from typing import Optional
 
 import jax
 import jax.numpy as jnp
@@ -7,7 +8,7 @@ import matplotlib.pyplot as plt
 
 from sbmpc import Model, ModelMjx, SamplingBasedMPC, BaseObjective
 from sbmpc.settings import Config
-from sbmpc.simulation import Simulator
+from sbmpc.simulation import Simulator, Visualizer
 from sbmpc.geometry import skew, quat_product, quat2rotm, quat_inverse
 from sbmpc.filter import MovingAverage
 
@@ -102,8 +103,8 @@ class Objective(BaseObjective):
 
 
 class Simulation(Simulator):
-    def __init__(self, initial_state, model, controller, nq: int, num_iterations: int, visualization):
-        super().__init__(initial_state, model, controller, nq, num_iterations, visualization)
+    def __init__(self, initial_state, model, controller, nq: int, num_iterations: int, visualizer: Optional[Visualizer] = None):
+        super().__init__(initial_state, model, controller, nq, num_iterations, visualizer)
 
         self.gain_matrix = jnp.zeros((4, 13))
         self.input_ff = jnp.zeros(4)
@@ -148,7 +149,7 @@ if __name__ == "__main__":
     input_sequence = solver.command(x_init, reference).block_until_ready()
 
     # Setup and run the simulation
-    sim = Simulation(state_init, system, solver, q_init, 500, False)
+    sim = Simulation(state_init, system, solver, q_init, 500)
     sim.gain_matrix = solver.gains
     sim.input_ff = input_sequence[:system.nu]
     sim.simulate()
