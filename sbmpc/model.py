@@ -6,17 +6,20 @@ from mujoco import mjx
 
 
 class BaseModel(ABC):
-    def __init__(self, nq: int, nv: int, nu: int, input_bounds=(-jnp.inf, jnp.inf)):
+    def __init__(self, nq: int, nv: int, nu: int, np=0, input_bounds=(-jnp.inf, jnp.inf)):
         self.nq = nq  # number of generalized coordinates = dim(qpos)
         self.nv = nv  # number of degrees of freedom = dim(qvel)
         self.nx = nq + nv
         self.nu = nu  # number of control inputs
+        self.np = np
         if jnp.array_equal(input_bounds, (-jnp.inf, jnp.inf)):
             self.input_min = input_bounds[0]*jnp.ones(self.nu, dtype=jnp.float32)
             self.input_max = input_bounds[1]*jnp.ones(self.nu, dtype=jnp.float32)
         else:
             self.input_min = input_bounds[0]
             self.input_max = input_bounds[1]
+
+        self.nominal_parameters = jnp.array([])
 
     def integrate(self, state, inputs, dt):
         pass
@@ -27,16 +30,20 @@ class BaseModel(ABC):
     def integrate_rollout_single(self, state, inputs, dt):
         pass
 
+    def sensitivity_step(self, state, inputs, params, state_sensitivity, input_sensitivity, dt):
+        pass
+
 
 class ModelParametric(BaseModel):
     def __init__(self, model_dynamics_parametric,
                  nq: int,
                  nv: int,
                  nu: int,
+                 np=0,
                  input_bounds=(-jnp.inf, jnp.inf),
                  integrator_type="si_euler"):
 
-        super().__init__(nq, nv, nu, input_bounds)
+        super().__init__(nq, nv, nu, np, input_bounds)
 
         self.dynamics_parametric = model_dynamics_parametric
 
@@ -54,7 +61,7 @@ class ModelParametric(BaseModel):
             Available types: si_euler, euler, rk4, custom_discrete
             """)
 
-        self.partial_sens_all = jax.jacfwd(self.integrate_parametric)
+        self.partial_sens_all = jax.jacfwd(self.integrate_parametric, argnums=(0, 1, 2))
 
     def integrate_rk4(self, state, inputs, params, dt: float):
         """
@@ -75,7 +82,6 @@ class ModelParametric(BaseModel):
     def integrate_si_euler(self, state, inputs, params, dt: float):
         """
         Semi-implicit Euler integration.
-
         As of now this is probably implemented inefficiently because the whole dynamics is evaluated two times.
         """
         v_kp1 = state[self.nq:] + dt * self.dynamics_parametric(state, inputs, params)[self.nq:]
@@ -83,12 +89,12 @@ class ModelParametric(BaseModel):
                     state[:self.nq] + dt * self.dynamics_parametric(jnp.concatenate([state[:self.nq], v_kp1]), inputs, params)[:self.nq],
                     v_kp1])
 
-    def sensitivity_step(self, state, inputs, params, state_sensitivity, input_sensitivity):
+    def sensitivity_step(self, state, inputs, params, state_sensitivity, input_sensitivity, dt):
 
-        p_sens_all = self.partial_sens_all(state, inputs, params)
-        p_sens_state = p_sens_all[:, self.nx]
-        p_sens_inputs = p_sens_all[:, self.nx: self.nx + self.nu]
-        p_sens_params = p_sens_all[:, self.nx + self.nu:]
+        p_sens_all = self.partial_sens_all(state, inputs, params, dt)
+        p_sens_state = p_sens_all[0]
+        p_sens_inputs = p_sens_all[1]
+        p_sens_params = p_sens_all[2]
 
         return p_sens_state @ state_sensitivity + p_sens_inputs @ input_sensitivity + p_sens_params
 
@@ -98,7 +104,7 @@ class Model(ModelParametric):
                  nq: int,
                  nv: int,
                  nu: int,
-                 nominal_parameters=0,
+                 nominal_parameters=jnp.array([]),
                  input_bounds=(-jnp.inf, jnp.inf),
                  integrator_type="si_euler"):
         """
@@ -111,7 +117,7 @@ class Model(ModelParametric):
         :param integrator_type: Available integrators are [si_euler, euler, rk4, custom_discrete]
         """
 
-        super().__init__(model_dynamics, nq, nv, nu, input_bounds, integrator_type)
+        super().__init__(model_dynamics, nq, nv, nu, len(nominal_parameters), input_bounds, integrator_type)
 
         self.nominal_parameters = nominal_parameters
 
@@ -136,7 +142,7 @@ class ModelMjx(BaseModel):
         else:
             input_bounds = [input_bounds[0], input_bounds[1]]
 
-        super().__init__(self.mj_model.nq, self.mj_model.nv, self.mj_model.nu, input_bounds)
+        super().__init__(self.mj_model.nq, self.mj_model.nv, self.mj_model.nu, input_bounds=input_bounds)
         self.mj_data = mujoco.MjData(self.mj_model)
         # self.renderer = mujoco.Renderer(mj_model)
         self.model = mjx.put_model(self.mj_model)
@@ -155,7 +161,7 @@ class ModelMjx(BaseModel):
             self.integrate_rollout_single = self._integrate
 
 
-    # here we need to work on data that are already on the gpu
+    # here we need to work on data that is already on the gpu
     def _integrate_mjx(self, state: mjx.Data, inputs: jnp.array, dt: float):
         state_next = state.replace(ctrl=inputs)
         state_next = mjx.step(self.model, state_next)
