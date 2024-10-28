@@ -17,6 +17,9 @@ class BaseModel(ABC):
         else:
             self.input_min = input_bounds[0]
             self.input_max = input_bounds[1]
+    
+    def get_nq(self):
+        return self.nq
 
     def integrate(self, state, inputs, dt):
         pass

@@ -42,8 +42,8 @@ class Objective(BaseObjective):
 
 
 class Simulation(Simulator):
-    def __init__(self, initial_state, model, controller, nq: int, num_iterations: int, visualizer: Optional[Visualizer] = None):
-        super().__init__(initial_state, model, controller, nq, num_iterations, visualizer)
+    def __init__(self, initial_state, model, controller, num_iterations: int, visualizer: Optional[Visualizer] = None):
+        super().__init__(initial_state, model, controller, num_iterations, visualizer)
 
 
     def run_kinematics(self):
@@ -94,7 +94,7 @@ if __name__ == "__main__":
     solver.command(q_init, jnp.zeros(3)).block_until_ready()
 
     # Setup and run the simulation
-    sim = Simulation(q_init, system, solver, len(q_init), 5000, visualizer=visualizer)
+    sim = Simulation(q_init, system, solver, 5000, visualizer=visualizer)
     sim.simulate()
 
 

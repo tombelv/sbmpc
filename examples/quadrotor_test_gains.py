@@ -103,8 +103,8 @@ class Objective(BaseObjective):
 
 
 class Simulation(Simulator):
-    def __init__(self, initial_state, model, controller, nq: int, num_iterations: int, visualizer: Optional[Visualizer] = None):
-        super().__init__(initial_state, model, controller, nq, num_iterations, visualizer)
+    def __init__(self, initial_state, model, controller, num_iterations: int, visualizer: Optional[Visualizer] = None):
+        super().__init__(initial_state, model, controller, num_iterations, visualizer)
 
         self.gain_matrix = jnp.zeros((4, 13))
         self.input_ff = jnp.zeros(4)
@@ -149,7 +149,7 @@ if __name__ == "__main__":
     input_sequence = solver.command(x_init, reference).block_until_ready()
 
     # Setup and run the simulation
-    sim = Simulation(state_init, system, solver, q_init, 500)
+    sim = Simulation(state_init, system, solver, 500)
     sim.gain_matrix = solver.gains
     sim.input_ff = input_sequence[:system.nu]
     sim.simulate()

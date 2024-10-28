@@ -7,6 +7,7 @@ import mujoco.viewer
 import time
 import logging
 import traceback
+from sbmpc.model import BaseModel
 from typing import Callable, Tuple, Optional
 
 
@@ -96,13 +97,12 @@ class MujocoVisualizer(Visualizer):
 
 
 class Simulator(ABC):
-    def __init__(self, initial_state, model, controller, nq: int, num_iter=100, visualizer: Optional[Visualizer] = None):
+    def __init__(self, initial_state, model: BaseModel, controller, num_iter=100, visualizer: Optional[Visualizer] = None):
         self.iter = 0
         self.current_state = initial_state
         self.model = model
         self.controller = controller
         self.num_iter = num_iter
-        self.nq = nq
 
         if isinstance(initial_state, (np.ndarray, jnp.ndarray)):
             self.current_state_vec = lambda: self.current_state
@@ -140,7 +140,7 @@ class Simulator(ABC):
                         self.step()
 
                         self.visualizer.set_qpos(self.current_state_vec()[
-                            :self.nq])
+                            :self.model.get_nq()])
 
                         time_until_next_step = self.controller.dt - \
                             (time.time() - step_start)

@@ -35,8 +35,8 @@ class Objective(BaseObjective):
 
 
 class Simulation(Simulator):
-    def __init__(self, initial_state, model, controller, nq: int, num_iterations: int):
-        super().__init__(initial_state, model, controller, nq, num_iterations)
+    def __init__(self, initial_state, model, controller, num_iterations: int):
+        super().__init__(initial_state, model, controller, num_iterations)
 
     def update(self):
         x_des = jnp.array([0, 0, jnp.pi], dtype=jnp.float32)
@@ -70,7 +70,7 @@ if __name__ == "__main__":
     solver = SamplingBasedMPC(system, Objective(), config)
 
     # Setup and run the simulation
-    sim = Simulation(x_init, system, solver, len(x_init), 500)
+    sim = Simulation(x_init, system, solver, 500)
     sim.simulate()
 
     # Plot x-y position of the robot

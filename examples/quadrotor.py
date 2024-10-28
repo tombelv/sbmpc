@@ -104,8 +104,8 @@ class Objective(BaseObjective):
 
 
 class Simulation(Simulator):
-    def __init__(self, initial_state, model, controller, nq: int, num_iterations: int, visualizer: Optional[Visualizer] = None):
-        super().__init__(initial_state, model, controller, nq, num_iterations, visualizer)
+    def __init__(self, initial_state, model, controller, num_iterations: int, visualizer: Optional[Visualizer] = None):
+        super().__init__(initial_state, model, controller, num_iterations, visualizer)
 
     def update(self):
         q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
@@ -172,7 +172,7 @@ if __name__ == "__main__":
         visualizer = MujocoVisualizer(mj_model, mj_data, step_mujoco=step_mujoco)
 
     # Setup and run the simulation
-    sim = Simulation(state_init, system, solver, len(q_init), 500, visualizer)
+    sim = Simulation(state_init, system, solver, 500, visualizer)
     sim.simulate()
 
     ax = plt.figure().add_subplot(projection='3d')
