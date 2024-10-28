@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 from sbmpc import Model, ModelMjx, SamplingBasedMPC, BaseObjective
 from sbmpc.settings import Config
-from sbmpc.simulation import Simulator, Visualizer
+from sbmpc.simulation import Simulator, Visualizer, construct_mj_visualizer_from_model
 from sbmpc.geometry import skew, quat_product, quat2rotm, quat_inverse
 from sbmpc.filter import MovingAverage
 
@@ -31,6 +31,7 @@ spatial_inertia_mat_inv = jnp.linalg.inv(spatial_inertia_mat)
 
 input_hover = jnp.array([mass*gravity, 0., 0., 0.], dtype=jnp.float32)
 
+SCENE_PATH = "bitcraze_crazyflie_2/scene.xml"
 
 @jax.jit
 def quadrotor_dynamics(state: jnp.array, inputs: jnp.array) -> jnp.array:
@@ -103,7 +104,10 @@ class Objective(BaseObjective):
 
 
 class Simulation(Simulator):
-    def __init__(self, initial_state, model, controller, num_iterations: int, visualizer: Optional[Visualizer] = None):
+    def __init__(self, initial_state, model, controller, num_iterations: int, visualize: bool = False):
+        visualizer = None
+        if visualize:
+            visualizer = construct_mj_visualizer_from_model(model, SCENE_PATH)
         super().__init__(initial_state, model, controller, num_iterations, visualizer)
 
         self.gain_matrix = jnp.zeros((4, 13))
@@ -127,6 +131,7 @@ class Simulation(Simulator):
 if __name__ == "__main__":
 
     config = Config()
+    config.general["visualize"] = False
     config.MPC["dt"] = 0.02
     config.MPC["horizon"] = 25
     config.MPC["std_dev_mppi"] = jnp.array([0.2, 0.3, 0.3, 0.15])
@@ -149,7 +154,7 @@ if __name__ == "__main__":
     input_sequence = solver.command(x_init, reference).block_until_ready()
 
     # Setup and run the simulation
-    sim = Simulation(state_init, system, solver, 500)
+    sim = Simulation(state_init, system, solver, 500, config.general["visualize"])
     sim.gain_matrix = solver.gains
     sim.input_ff = input_sequence[:system.nu]
     sim.simulate()

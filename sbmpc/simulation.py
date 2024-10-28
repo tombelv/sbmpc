@@ -7,7 +7,7 @@ import mujoco.viewer
 import time
 import logging
 import traceback
-from sbmpc.model import BaseModel
+from sbmpc.model import BaseModel, ModelMjx
 from typing import Callable, Tuple, Optional
 
 
@@ -51,7 +51,7 @@ class Visualizer(ABC):
 
 
 class MujocoVisualizer(Visualizer):
-    def __init__(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjModel, step_mujoco: bool = True, show_left_ui: bool = False, show_right_ui: bool = False):
+    def __init__(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData, step_mujoco: bool = True, show_left_ui: bool = False, show_right_ui: bool = False):
         self.mj_data = mj_data
         self.mj_model = mj_model
         self.step_mujoco = step_mujoco
@@ -94,6 +94,19 @@ class MujocoVisualizer(Visualizer):
             self.mj_data.qpos = qpos
             mujoco.mj_fwdPosition(self.mj_model, self.mj_data)
         self.viewer.sync()
+
+def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str):
+    mj_model, mj_data = (None, None)
+    step_mujoco = True
+    if isinstance(model, ModelMjx):
+        mj_model = model.mj_model
+        mj_data = model.mj_data
+    else:
+        new_system = ModelMjx(scene_path)
+        mj_model = new_system.mj_model
+        mj_data = new_system.mj_data
+    visualizer = MujocoVisualizer(mj_model, mj_data, step_mujoco=step_mujoco)
+    return visualizer
 
 
 class Simulator(ABC):

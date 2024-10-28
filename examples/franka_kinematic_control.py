@@ -5,7 +5,7 @@ import jax.numpy as jnp
 
 from sbmpc import  ModelMjx, SamplingBasedMPC, BaseObjective
 from sbmpc.settings import Config
-from sbmpc.simulation import Simulator, MujocoVisualizer, Visualizer
+from sbmpc.simulation import Simulator, MujocoVisualizer, Visualizer, construct_mj_visualizer_from_model
 from sbmpc.filter import MovingAverage
 from typing import Optional
 
@@ -15,6 +15,8 @@ import mujoco
 os.environ['XLA_FLAGS'] = (
         '--xla_gpu_triton_gemm_any=True '
     )
+
+SCENE_PATH = "franka_emika_panda/scene.xml"
 
 
 
@@ -42,9 +44,11 @@ class Objective(BaseObjective):
 
 
 class Simulation(Simulator):
-    def __init__(self, initial_state, model, controller, num_iterations: int, visualizer: Optional[Visualizer] = None):
+    def __init__(self, initial_state, model, controller, num_iterations: int, visualize: bool = False):
+        visualizer = None
+        if visualize:
+            visualizer = construct_mj_visualizer_from_model(model, SCENE_PATH)
         super().__init__(initial_state, model, controller, num_iterations, visualizer)
-
 
     def run_kinematics(self):
         mujoco.mj_kinematics(
@@ -70,7 +74,7 @@ class Simulation(Simulator):
 if __name__ == "__main__":
 
     config = Config()
-    config.general["visualize"] = True
+    config.general["visualize"] = False
     config.MPC["dt"] = 0.02
     config.MPC["horizon"] = 25
     config.MPC["std_dev_mppi"] = 0.2*jnp.ones(7)
@@ -79,14 +83,10 @@ if __name__ == "__main__":
     config.MPC["filter"] = MovingAverage(window_size=3, step_size=7)
 
 
-    system = ModelMjx("franka_emika_panda/scene.xml", kinematic=True)
+    system = ModelMjx(SCENE_PATH, kinematic=True)
     system.set_qpos(system.mj_model.key_qpos[mujoco.mj_name2id(system.mj_model, mujoco.mjtObj.mjOBJ_KEY.value, "home")])
     q_init = system.data.qpos
     print("Initial configuration = ", q_init)
-
-    visualizer = None
-    if config.general["visualize"]:
-        visualizer = MujocoVisualizer(system.mj_model, system.mj_data)
 
     solver = SamplingBasedMPC(system, Objective(system), config)
 
@@ -94,7 +94,7 @@ if __name__ == "__main__":
     solver.command(q_init, jnp.zeros(3)).block_until_ready()
 
     # Setup and run the simulation
-    sim = Simulation(q_init, system, solver, 5000, visualizer=visualizer)
+    sim = Simulation(q_init, system, solver, 5000, visualize=config.general["visualize"])
     sim.simulate()
 
 
