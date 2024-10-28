@@ -13,9 +13,9 @@ mamba env create -f environment.yml
 ```
 
 # TODO
-- [ ] Control parametrization (splines etc)
+- [x] Control parametrization (splines etc)
 - [x] Multivariate gaussian sampling 
-- [ ] Generic constraints
+- [x] Generic constraints
 - [ ] adding Adam for interfacing the library with any urdf 
 
 
