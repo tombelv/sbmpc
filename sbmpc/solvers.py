@@ -72,6 +72,8 @@ class SamplingBasedMPC:
         self.num_parallel_computations = config.MPC["num_parallel_computations"]
 
         self.lam = config.MPC["lambda"]
+
+        self.compute_gains = config.MPC["gains"]
         
         # Covariance of the input action
         # self.sigma_mppi = jnp.diag(config.MPC["std_dev_mppi"]**2)
@@ -115,16 +117,15 @@ class SamplingBasedMPC:
         # Jit the controller function
         self.compute_control_mppi = jax.jit(self._compute_control_mppi, device=self.device)
 
-        self.compute_gains = config.MPC["gains"]
+
         self.gains = jnp.zeros((model.nu, model.nx))
-        self.rollout = jax.vmap(self.rollout_single, in_axes=(None, None, 0), out_axes=(0, 0))
 
         # self.ctrl_sens_to_state = jax.jit(jax.jacfwd(self.compute_control_mppi, argnums=0, has_aux=True), device=self.device)
 
         self.rollout_sens_to_state = jax.vmap(jax.value_and_grad(self.rollout_single, argnums=0, has_aux=True), in_axes=(None, None, 0), out_axes=(0, 0))
 
+        # Rename functions for cost during rollout
         self.cost_and_constraints = self.objective.cost_and_constraints
-
         self.final_cost_and_constraints = self.objective.final_cost_and_constraints
 
     @partial(jax.vmap, in_axes=(None, 0), out_axes=0)
@@ -133,6 +134,10 @@ class SamplingBasedMPC:
 
     def clip_input_single(self, control_variables):
         return jnp.clip(control_variables, self.input_min_full_horizon, self.input_max_full_horizon)
+
+    @partial(jax.vmap, in_axes=(None, None, None, 0, None), out_axes=(0, 0))
+    def rollout_all(self, initial_state, reference, control_variables):
+        return self.rollout_single(initial_state, reference, control_variables)
 
     def rollout_single(self, initial_state, reference, control_variables):
 
@@ -152,8 +157,9 @@ class SamplingBasedMPC:
         #     reference = reference.at[1:, -self.model.nu - 1:-1].set(control_variables)
 
         for idx in range(self.horizon):
+            # We multiply the cost by the timestep to mimic a continuous time integration and make it work better when
+            # changing the timestep and time horizon jointly
             cost += self.dt*self.cost_and_constraints(curr_state, control_variables[idx, :], reference[idx, :])
-            # Integrate the dynamics
             curr_state = self.model.integrate_rollout_single(curr_state, control_variables[idx, :], self.dt)
             # rollout_states = rollout_states.at[idx+1, :].set(curr_state)
 
@@ -211,7 +217,7 @@ class SamplingBasedMPC:
             if self.compute_gains:
                 (costs, control_vars_all), gradients = self.rollout_sens_to_state(state, reference, control_vars_all)
             else:
-                costs, control_vars_all = self.rollout(state, reference, control_vars_all)
+                costs, control_vars_all = self.rollout_all(state, reference, control_vars_all)
 
         additional_random_parameters_clipped = control_vars_all - best_control_vars
 
