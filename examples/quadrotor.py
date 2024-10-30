@@ -107,7 +107,7 @@ class Simulation(Simulator):
         super().__init__(initial_state, model, controller, num_iterations, visualization)
 
     def update(self):
-        q_des = jnp.array([1.0, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
+        q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
         x_des = jnp.concatenate([q_des, jnp.zeros(self.model.nv, dtype=jnp.float32)], axis=0)
 
         reference = jnp.concatenate((x_des, input_hover))
@@ -127,18 +127,18 @@ class Simulation(Simulator):
 if __name__ == "__main__":
 
     config = Config()
-    config.MPC["dt"] = 0.04
+    config.MPC["dt"] = 0.02
     config.MPC["horizon"] = 25
-    config.MPC["std_dev_mppi"] = 0.1*jnp.array([0.1, 0.1, 0.1, 0.05])
-    config.MPC["num_parallel_computations"] = 1000
+    config.MPC["std_dev_mppi"] = 0.2*jnp.array([0.1, 0.1, 0.1, 0.05])
+    config.MPC["num_parallel_computations"] = 2000
     config.MPC["initial_guess"] = input_hover
 
-    config.MPC["lambda"] = 100.0
+    config.MPC["lambda"] = 50.0
 
     config.MPC["smoothing"] = "Spline"
     config.MPC["num_control_points"] = 5
 
-    config.MPC["gains"] = True
+    config.MPC["gains"] = False
 
     if MODEL == "classic":
         system = Model(quadrotor_dynamics, nq=7, nv=6, nu=4, input_bounds=[input_min, input_max], integrator_type="si_euler")
@@ -159,7 +159,7 @@ if __name__ == "__main__":
     action = solver.command(x_init, jnp.concatenate((x_init, input_hover)), False).block_until_ready()
 
     # Setup and run the simulation
-    sim = Simulation(state_init, system, solver, 200, False)
+    sim = Simulation(state_init, system, solver, 500, False)
     sim.simulate()
 
     time_vect = config.MPC["dt"]*jnp.arange(sim.state_traj.shape[0])
