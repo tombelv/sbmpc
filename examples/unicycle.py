@@ -27,7 +27,7 @@ class Objective(BaseObjective):
     def running_cost(self, state: jnp.array, inputs: jnp.array, reference: jnp.array) -> jnp.float32:
         """ Cost function to regulate the state to the desired value"""
         error = state[:2] - reference[:2]
-        return 5 * jnp.linalg.norm(error, ord=2) + jnp.linalg.norm(inputs, ord=2)
+        return 1 * jnp.linalg.norm(error, ord=2) + jnp.linalg.norm(inputs, ord=2)
 
     def final_cost(self, state, reference):
         error = state - reference
@@ -65,7 +65,7 @@ if __name__ == "__main__":
     config.MPC["std_dev_mppi"] = jnp.array([0.1, 0.1])
     config.MPC["num_parallel_computations"] = 2000
 
-    config.MPC["lambda"] = 0.5
+    config.MPC["lambda"] = 5.0
 
     config.MPC["smoothing"] = "Spline"
     config.MPC["num_control_points"] = 5

@@ -68,7 +68,7 @@ if __name__ == "__main__":
     config.MPC["std_dev_mppi"] = 0.2*jnp.ones(7)
     config.MPC["num_parallel_computations"] = 1000
 
-    config.MPC["lambda"] = 1
+    config.MPC["lambda"] = 100.0
 
     config.MPC["smoothing"] = "Spline"
     config.MPC["num_control_points"] = 5
