@@ -15,6 +15,7 @@ dependencies:
 - cmake 
 - pkg-config 
 - make 
-- ninja 
+- ninja
+- control
 - pip:
   - mujoco-mjx

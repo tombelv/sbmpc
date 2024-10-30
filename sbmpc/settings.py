@@ -36,7 +36,9 @@ class Config:
                     "initial_guess": None,
                     "filter": None,
                     "gains": False,
-                    "smoothing": "Filter",
+                    "sensitivity": False,
+                    "smoothing": None,
+                    "augmented_reference": False,
                     "num_control_points": -1}
 
     def setup(self):
