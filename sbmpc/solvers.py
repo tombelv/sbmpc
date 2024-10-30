@@ -117,11 +117,8 @@ class SamplingBasedMPC:
         # Jit the controller function
         self.compute_control_mppi = jax.jit(self._compute_control_mppi, device=self.device)
 
-
         self.gains = jnp.zeros((model.nu, model.nx))
-
         # self.ctrl_sens_to_state = jax.jit(jax.jacfwd(self.compute_control_mppi, argnums=0, has_aux=True), device=self.device)
-
         self.rollout_sens_to_state = jax.vmap(jax.value_and_grad(self.rollout_single, argnums=0, has_aux=True), in_axes=(None, None, 0), out_axes=(0, 0))
 
         # Rename functions for cost during rollout
@@ -135,7 +132,7 @@ class SamplingBasedMPC:
     def clip_input_single(self, control_variables):
         return jnp.clip(control_variables, self.input_min_full_horizon, self.input_max_full_horizon)
 
-    @partial(jax.vmap, in_axes=(None, None, None, 0, None), out_axes=(0, 0))
+    @partial(jax.vmap, in_axes=(None, None, None, 0), out_axes=(0, 0))
     def rollout_all(self, initial_state, reference, control_variables):
         return self.rollout_single(initial_state, reference, control_variables)
 
