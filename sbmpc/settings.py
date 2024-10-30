@@ -29,9 +29,28 @@ class Config:
     def __init__(self):
         self.general = {"dtype": jnp.float32, "device": jax.devices()[0], "visualize": False}
         self.MPC = {"dt": 0.0,
-                    "horizon": 1,
+                    "horizon": -1,
                     "num_parallel_computations": 1000,
+                    "lambda": 1.0,
                     "std_dev_mppi": None,
                     "initial_guess": None,
                     "filter": None,
-                    "gains": False}
+                    "gains": False,
+                    "sensitivity": False,
+                    "smoothing": None,
+                    "augmented_reference": False,
+                    "num_control_points": -1}
+
+    def setup(self):
+        """
+        Implements checks (TBD) and sets variables that depend on the user provided configuration
+        """
+        if self.MPC["horizon"] > 0:
+            if self.MPC["num_control_points"] == -1:
+                self.MPC["num_control_points"] = self.MPC["horizon"]
+        else:
+            raise ValueError("""
+            Control horizon not set or not integer type
+            Set its value using
+            self.MPC["horizon"] = [INT>0]
+                        """)

@@ -8,6 +8,8 @@ from functools import partial
 
 from abc import ABC, abstractmethod
 
+from sbmpc.filter import cubic_spline_interpolation
+
 
 class BaseObjective(ABC):
     def __init__(self, robot_model=None):
@@ -19,6 +21,24 @@ class BaseObjective(ABC):
 
     def final_cost(self, state, reference):
         return 0.0
+
+    def cost_and_constraints(self, state, inputs, reference):
+        return self.running_cost(state, inputs, reference) + self.make_barrier(self.constraints(state, inputs, reference))
+
+    def final_cost_and_constraints(self, state, reference):
+        return self.final_cost(state, reference) + self.make_barrier(self.terminal_constraints(state, reference))
+
+    def make_barrier(self, constraint_array):
+        constraint_array = jnp.where(constraint_array > 0, 1e5, constraint_array)
+        constraint_array = jnp.where(constraint_array <= 0, 0.0, constraint_array)
+        return constraint_array
+
+    def constraints(self, state, inputs, reference):
+        return 0.0
+
+    def terminal_constraints(self, state, reference):
+        return 0.0
+
 
 
 class SamplingBasedMPC:
@@ -41,36 +61,46 @@ class SamplingBasedMPC:
         self.model = model
         self.objective = objective
 
+        config.setup()
+        self.config = config
+
         # Sampling time for discrete time model
         self.dt = config.MPC["dt"]
         # Control horizon of the MPC (steps)
         self.horizon = config.MPC["horizon"]
         # Monte-carlo samples, that is the number of trajectories that are evaluated in parallel
         self.num_parallel_computations = config.MPC["num_parallel_computations"]
+
+        self.lam = config.MPC["lambda"]
+
+        self.compute_gains = config.MPC["gains"]
         
         # Covariance of the input action
-        self.sigma_mppi = jnp.diag(config.MPC["std_dev_mppi"]**2)
+        # self.sigma_mppi = jnp.diag(config.MPC["std_dev_mppi"]**2)
         
         # Total number of inputs over time (stored in a 1d vector)
         self.num_control_variables = model.nu * self.horizon
+        self.num_control_points = config.MPC["num_control_points"]
+        self.control_points_sparsity = self.horizon // config.MPC["num_control_points"]
 
         self.dtype_general = config.general["dtype"]
         self.device = config.general["device"]
 
-        self.input_max_full_horizon = jnp.tile(model.input_max, self.horizon)
-        self.input_min_full_horizon = jnp.tile(model.input_min, self.horizon)
+        self.input_max_full_horizon = jnp.tile(model.input_max, (self.horizon, 1))
+        self.input_min_full_horizon = jnp.tile(model.input_min, (self.horizon, 1))
 
         self.clip_input = jax.jit(self.clip_input, device=self.device)
 
-        self.std_dev_horizon = jnp.tile(config.MPC["std_dev_mppi"], self.horizon)
+        self.std_dev = config.MPC["std_dev_mppi"]
+        self.std_dev_horizon = jnp.tile(self.std_dev, self.num_control_points)
 
         # Initialize the vector storing the current optimal input sequence
         if config.MPC["initial_guess"] is None:
-            self.initial_guess = 0.0 * config.MPC["std_dev_mppi"]
-            self.best_control_vars = jnp.zeros((self.num_control_variables,), dtype=self.dtype_general)
+            self.initial_guess = 0.0 * self.std_dev
+            self.best_control_vars = jnp.zeros((self.horizon,self.model.nu), dtype=self.dtype_general)
         else:
             self.initial_guess = config.MPC["initial_guess"]
-            self.best_control_vars = jnp.tile(self.initial_guess, self.horizon)
+            self.best_control_vars = jnp.tile(self.initial_guess, (self.horizon, 1))
 
         self.filter = config.MPC["filter"]
         if self.filter is not None:
@@ -78,161 +108,134 @@ class SamplingBasedMPC:
         else:
             self.last_inputs_window = jnp.tile(self.initial_guess, 1)
 
+        self.last_input = self.initial_guess
+
         self.master_key = jax.random.PRNGKey(420)
-        self.initial_random_parameters = jnp.zeros((self.num_parallel_computations, self.num_control_variables),
+        self.initial_random_parameters = jnp.zeros((self.num_parallel_computations, self.num_control_points, self.model.nu),
                                                    dtype=self.dtype_general)
 
-        # if isinstance(model, Model):
-        #     self.batch_state = self._batch_state
-        # elif isinstance(model, ModelMjx):
-        #     self.batch_state = self._batch_state_mjx
-        # else:
-        #     raise ValueError("""
-        #                 Invalid model.
-        #                 """)
-
-        # self.vectorized_rollout = jax.vmap(self.compute_rollout, in_axes=(None, None, 0), out_axes=0)
-        # self.jit_vectorized_rollout = jax.jit(self.vectorized_rollout, device=config_general.device)
-
         # Jit the controller function
-        self.jit_compute_control_mppi = jax.jit(self.compute_control_mppi, device=self.device)
+        self.compute_control_mppi = jax.jit(self._compute_control_mppi, device=self.device)
 
-        self.compute_gains = config.MPC["gains"]
         self.gains = jnp.zeros((model.nu, model.nx))
-        self.ctrl_sens_to_state = jax.jit(jax.jacfwd(self.compute_control_mppi, argnums=0), device=self.device)
+        # self.ctrl_sens_to_state = jax.jit(jax.jacfwd(self.compute_control_mppi, argnums=0, has_aux=True), device=self.device)
+        self.rollout_sens_to_state = jax.vmap(jax.value_and_grad(self.rollout_single, argnums=0, has_aux=True), in_axes=(None, None, 0), out_axes=(0, 0))
 
-        self.running_cost = jax.jit(jax.vmap(self.objective.running_cost, in_axes=(0, 0, None), out_axes=0),
-                                    device=self.device)
-
-        self.final_cost = jax.jit(jax.vmap(self.objective.final_cost, in_axes=(0, None), out_axes=0),
-                                  device=self.device)
+        # Rename functions for cost during rollout
+        self.cost_and_constraints = self.objective.cost_and_constraints
+        self.final_cost_and_constraints = self.objective.final_cost_and_constraints
 
     @partial(jax.vmap, in_axes=(None, 0), out_axes=0)
     def clip_input(self, control_variables):
         return jnp.clip(control_variables, self.input_min_full_horizon, self.input_max_full_horizon)
 
-    # def compute_rollout(self, initial_state, reference, control_variables):
-    #     """
-    #     !!! As of now this only works for the classic model !!!
-    #
-    #     Calculate cost of a rollout of the dynamics given random control variables.
-    #     Parameters
-    #     ----------
-    #     initial_state : jnp.array
-    #         Initial state of the rollout.
-    #     reference : jnp.array
-    #         Desired state of the robot
-    #     control_variables
-    #         Vector of control inputs over the trajectory
-    #     Returns
-    #     -------
-    #     cost : float
-    #         cost of the rollout
-    #     """
-    #     def iterate_fun(idx, carry):
-    #         sum_cost, curr_state, reference = carry
-    #
-    #         current_input = jax.lax.dynamic_slice_in_dim(control_variables, idx * self.model.nu, self.model.nu)
-    #
-    #         running_cost = self.objective.running_cost(curr_state, current_input, reference[idx, :])
-    #
-    #         # Integrate the dynamics
-    #         state_next = self.model.integrate(curr_state, current_input, self.dt)
-    #
-    #         return sum_cost + running_cost, state_next, reference
-    #
-    #     carry = (jnp.float32(0.0), initial_state, reference)
-    #     cost, state, reference = jax.lax.fori_loop(0, self.horizon, iterate_fun, carry)
-    #
-    #     cost = cost + self.objective.final_cost(state, reference[self.horizon, :])
-    #
-    #     return cost
+    def clip_input_single(self, control_variables):
+        return jnp.clip(control_variables, self.input_min_full_horizon, self.input_max_full_horizon)
 
-    def _rollout(self, initial_state, reference, control_variables):
+    @partial(jax.vmap, in_axes=(None, None, None, 0), out_axes=(0, 0))
+    def rollout_all(self, initial_state, reference, control_variables):
+        return self.rollout_single(initial_state, reference, control_variables)
 
-        cost = jnp.zeros(self.num_parallel_computations)
+    def rollout_single(self, initial_state, reference, control_variables):
 
-        curr_state = self._batch_state(initial_state)
+        cost = 0.0
+        curr_state = initial_state
+        # rollout_states = jnp.zeros((self.horizon+1, self.model.nx), dtype=self.dtype_general)
+        # rollout_states = rollout_states.at[0, :].set(initial_state)
+        if self.config.MPC["smoothing"] == "Spline":
+            control_interp = cubic_spline_interpolation(jnp.arange(0, self.horizon, self.control_points_sparsity),
+                                                        control_variables,
+                                                        jnp.arange(0, self.horizon))
+            control_variables = self.clip_input_single(control_interp)
+        else:
+            control_variables = self.clip_input_single(control_variables)
+
+        # if self.config.MPC["augmented_reference"]:
+        #     reference = reference.at[1:, -self.model.nu - 1:-1].set(control_variables)
 
         for idx in range(self.horizon):
-            running_cost, curr_state = self._rollout_step(curr_state, reference, control_variables, idx)
-            cost += running_cost
+            # We multiply the cost by the timestep to mimic a continuous time integration and make it work better when
+            # changing the timestep and time horizon jointly
+            cost += self.dt*self.cost_and_constraints(curr_state, control_variables[idx, :], reference[idx, :])
+            curr_state = self.model.integrate_rollout_single(curr_state, control_variables[idx, :], self.dt)
+            # rollout_states = rollout_states.at[idx+1, :].set(curr_state)
 
-        cost += self.final_cost(curr_state, reference[self.horizon, :])
+        cost += self.dt*self.final_cost_and_constraints(curr_state, reference[self.horizon, :])
 
-        return cost
+        return cost, control_variables
 
-    def _rollout_step(self, state, reference, control_variables, idx):
-        current_input = jax.lax.dynamic_slice(control_variables,
-                                              (0, idx * self.model.nu),
-                                              (self.num_parallel_computations, self.model.nu))
-        running_cost = self.running_cost(state, current_input, reference[idx, :])
-        # Integrate the dynamics
-        state_next = self.model.integrate_rollout(state, current_input, self.dt)
-        return running_cost, state_next
-
-    def compute_control_mppi(self, state, reference, best_control_vars, key):
+    @partial(jax.vmap, in_axes=(None, None, None, 0, None), out_axes=(0, 0))
+    def rollout_with_sensitivity(self, initial_state, reference, control_variables, mppi_gains):
         """
-        This function computes the control parameters by applying MPPI.
-        Parameters
-        ----------
-        state : jnp.array
-            The current state of the robot for feedback
-        reference : jnp.array
-            The desired state of the robot
-        best_control_vars : jnp.array
-            The solution guess from the previous iterations
-        key
-         RNG key
-        Returns
-        -------
-        optimal_action : jnp.array
-            The optimal input trajectory shaped (num_control_variables, )
+        Rollout of the system and associated parametric sensitivity dynamics
+        :param initial_state:
+        :param reference:
+        :param control_variables:
+        :param mppi_gains:
+        :return:
         """
+        cost = 0
+        curr_state_sens = jnp.zeros((self.model.nx, self.model.np))
+        curr_state = initial_state
+        input_sequence = jnp.zeros((self.horizon, self.model.nu), dtype=self.dtype_general)
+        if self.config.MPC["smoothing"] == "Spline":
+            control_interp = cubic_spline_interpolation(jnp.arange(0, self.horizon, self.control_points_sparsity),
+                                        control_variables,
+                                        jnp.arange(0, self.horizon))
+            control_variables = self.clip_input_single(control_interp)
 
-        # Generate random parameters
-        # The first control parameters is the old best one, so we add zero noise there
-        additional_random_parameters = self.initial_random_parameters * 0.0
+        for idx in range(self.horizon):
+            curr_input = jax.lax.dynamic_slice(control_variables, (idx, 0), (1, self.model.nu)).reshape(-1)
+            curr_input_sens = mppi_gains @ curr_state_sens
+            cost_and_constraints = self.cost_and_constraints((curr_state, curr_state_sens), (curr_input, curr_input_sens), reference[idx, :])
+            # Integrate the dynamics
+            curr_state = self.model.integrate_rollout_single(curr_state, curr_input, self.dt)
+            curr_state_sens = self.model.sensitivity_step(curr_state, curr_input, self.model.nominal_parameters, curr_state_sens, curr_input_sens, self.dt)
+            cost += cost_and_constraints
+            input_sequence = input_sequence.at[idx, :].set(curr_input)
 
-        # GAUSSIAN
-        num_sample_gaussian_1 = self.num_parallel_computations - 1
+        cost += self.final_cost_and_constraints((curr_state, curr_state_sens), reference[self.horizon, :])
 
-        # Multivariate sampling with different standard deviation for the different inputs (slower implementation)
-        # sampled_variation = self.moving_average.filter_batch(jax.random.multivariate_normal(key,
-        #                                                    mean=jnp.zeros(self.model.nu),
-        #                                                    cov=self.sigma_mppi,
-        #                                                    shape=(num_sample_gaussian_1, self.horizon)).reshape(
-        #     num_sample_gaussian_1, self.num_control_variables))
+        return cost, input_sequence
 
-        sampled_variation = jax.random.normal(key=key, shape=(num_sample_gaussian_1, self.num_control_variables)) * self.std_dev_horizon
+    def _compute_control_mppi(self, state, reference, best_control_vars, key, gains):
 
-        additional_random_parameters = additional_random_parameters.at[1:self.num_parallel_computations].set(sampled_variation)
+        additional_random_parameters = self.sample_input_sequence(key)
 
-        if self.filter is not None:
-            # Compute the candidate control sequences considering input constraints
-            control_vars_all = self.filter.filter_batch(self.clip_input(best_control_vars + additional_random_parameters),
-                                                            self.last_inputs_window,
-                                                            jnp.array(()))
+        if self.config.MPC["smoothing"] == "Spline":
+            control_vars_all = best_control_vars[::self.control_points_sparsity, :] + additional_random_parameters
         else:
-            control_vars_all = self.clip_input(best_control_vars + additional_random_parameters)
+            control_vars_all = best_control_vars + additional_random_parameters
+
+        # Do rollout
+        if self.config.MPC["sensitivity"]:
+            costs, control_vars_all = self.rollout_with_sensitivity(state, reference, control_vars_all, gains)
+        else:
+            if self.compute_gains:
+                (costs, control_vars_all), gradients = self.rollout_sens_to_state(state, reference, control_vars_all)
+            else:
+                costs, control_vars_all = self.rollout_all(state, reference, control_vars_all)
 
         additional_random_parameters_clipped = control_vars_all - best_control_vars
 
-        # Do rollout
-        costs = self._rollout(state, reference, control_vars_all)
-
         # Compute MPPI update
-        cost, best_cost, worst_cost = self._sort_and_clip_costs(costs)
-        exp_costs = self._exp_costs_invariant(costs, best_cost, worst_cost)
-        # exp_costs = self._exp_costs_shifted(costs, best_cost)
+        costs, best_cost, worst_cost = self._sort_and_clip_costs(costs)
+        # exp_costs = self._exp_costs_invariant(costs, best_cost, worst_cost)
+        exp_costs = self._exp_costs_shifted(costs, best_cost)
 
         denom = jnp.sum(exp_costs)
         weights = exp_costs / denom
-        weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * additional_random_parameters_clipped.reshape(
-            (self.num_parallel_computations, self.num_control_variables, 1))
-        best_control_vars += jnp.sum(weighted_inputs, axis=0).reshape((self.num_control_variables,))
+        if self.compute_gains:
+            weights_grad_shift = jnp.sum(weights[:, jnp.newaxis] * gradients, axis=0)
+            weights_grad = -self.lam * weights[:, jnp.newaxis] * (gradients - weights_grad_shift)
+            gains = jnp.sum(jnp.einsum('bi,bo->bio', weights_grad, additional_random_parameters_clipped[:, 0, :]), axis=0).T
+        else:
+            gains = jnp.zeros_like(self.gains)
 
-        return best_control_vars
+        weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * additional_random_parameters_clipped
+        optimal_action = best_control_vars + jnp.sum(weighted_inputs, axis=0)
+
+        return optimal_action, gains
 
     def command(self, state, reference, shift_guess=True, num_steps=1):
         """
@@ -250,38 +253,37 @@ class SamplingBasedMPC:
         Returns
         -------
         optimal_action : jnp.array
-            The optimal input trajectory shaped (num_control_variables, )
+            The optimal input trajectory shaped (horizon, nu)
         """
-
         # If the reference is just a state, repeat it along the horizon
         if reference.ndim == 1:
             reference = jnp.tile(reference, (self.horizon+1, 1))
+        # if self.config.MPC["augmented_reference"]:
+        #     reference = jnp.concatenate((reference, jnp.tile(self.last_input, (self.horizon+1, 1)), jnp.arange(0, self.horizon+1, 1).reshape(self.horizon+1, 1)), axis=1)
 
         best_control_vars = self.best_control_vars
         # maybe this loop should be jitted to actually be more efficient
         for i in range(num_steps):
-            best_control_vars = self.jit_compute_control_mppi(state,
-                                                                    reference,
-                                                                    best_control_vars,
-                                                                    self.master_key)
-            if self.compute_gains:
-                self.gains = self.ctrl_sens_to_state(state, reference, best_control_vars, self.master_key)[:self.model.nu, :]
-
+            best_control_vars, gains = self.compute_control_mppi(state, reference, best_control_vars,
+                                                                self.master_key, self.gains)
+            self.gains = gains
+            # Below are the gains computed using the full jax autodiff instead of the more efficient formula
+            # print("old gains", self.ctrl_sens_to_state(state, reference, best_control_vars, self.master_key, self.gains)[0][0])
             self._update_key()
 
+        self.last_input = best_control_vars[0]
+
         if shift_guess:
-            self.last_inputs_window, self.best_control_vars = self._shift_guess(self.last_inputs_window, best_control_vars)
+            self.best_control_vars = self._shift_guess(best_control_vars)
         else:
-            self.last_inputs_window = self.last_inputs_window.at[-self.model.nu:].set(
-                best_control_vars[:self.model.nu])
             self.best_control_vars = best_control_vars
 
         return best_control_vars
 
     def _sort_and_clip_costs(self, costs):
         # Saturate the cost in case of NaN or inf
-        costs = jnp.where(jnp.isnan(costs), 1000000., costs)
-        costs = jnp.where(jnp.isinf(costs), 1000000., costs)
+        costs = jnp.where(jnp.isnan(costs), 1e6, costs)
+        costs = jnp.where(jnp.isinf(costs), 1e6, costs)
         # Take the best found control parameters
         best_index = jnp.nanargmin(costs)
         worst_index = jnp.nanargmax(costs)
@@ -291,11 +293,7 @@ class SamplingBasedMPC:
         return costs, best_cost, worst_cost
 
     def _exp_costs_shifted(self, costs, best_cost):
-
-        lam = 1.
-        exp_costs = jnp.exp(- lam * (costs - best_cost))
-
-        return exp_costs
+        return jnp.exp(- self.lam * (costs - best_cost))
 
     def _exp_costs_invariant(self, costs, best_cost, worst_cost):
         """
@@ -303,8 +301,9 @@ class SamplingBasedMPC:
         G. Rizzi, J. J. Chung, A. Gawel, L. Ott, M. Tognon and R. Siegwart,
         "Robust Sampling-Based Control of Mobile Manipulators for Interaction With Articulated Objects,"
         in IEEE Transactions on Robotics, vol. 39, no. 3, pp. 1929-1946, June 2023, doi: 10.1109/TRO.2022.3233343.
-        """
 
+        Not used anymore ATM since it does not work with constraints (to be investigated)
+        """
         h = 20.
         exp_costs = jnp.exp(- h * (costs - best_cost) / (worst_cost - best_cost))
 
@@ -314,22 +313,22 @@ class SamplingBasedMPC:
         newkey, subkey = jax.random.split(self.master_key)
         self.master_key = newkey
 
-    # def _batch_state_mjx(self, state):
-    #     state_vec = jnp.concatenate([state.qpos, state.qvel])
-    #     return jnp.tile(state_vec, (self.num_parallel_computations, 1))
-
-    def _batch_state(self, state):
-        state = jnp.tile(state, (self.num_parallel_computations, 1))
-        return state
-
     @partial(jax.jit, static_argnums=(0,), device=jax.devices("cpu")[0])
-    def _shift_guess(self, last_inputs_window, best_control_vars):
-        last_inputs_window_new = jnp.roll(last_inputs_window, shift=-self.model.nu, axis=0)
-        last_inputs_window_new = last_inputs_window_new.at[-self.model.nu:].set(
-            best_control_vars[:self.model.nu])
-        best_control_vars_shifted = jnp.roll(best_control_vars, shift=-self.model.nu, axis=0)
-        best_control_vars_shifted = best_control_vars_shifted.at[-self.model.nu:].set(
-            best_control_vars_shifted[-2 * self.model.nu:-self.model.nu])
+    def _shift_guess(self, best_control_vars):
+        best_control_vars_shifted = jnp.roll(best_control_vars, shift=-1, axis=0)
+        best_control_vars_shifted = best_control_vars_shifted.at[-1, :].set(
+            best_control_vars_shifted[-2:-1, :].reshape(-1))
 
-        return last_inputs_window_new, best_control_vars_shifted
+        return best_control_vars_shifted
 
+    def sample_input_sequence(self, key):
+        # Generate random parameters
+        # The first control parameters is the old best one, so we add zero noise there
+        additional_random_parameters = self.initial_random_parameters * 0.0
+        # One sample is kept equal to the guess
+        sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model.nu)) * self.std_dev
+
+        additional_random_parameters = additional_random_parameters.at[1:, :, :].set(
+            sampled_variation_all)
+
+        return additional_random_parameters

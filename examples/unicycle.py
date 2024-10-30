@@ -11,12 +11,12 @@ from sbmpc.simulation import Simulator
 from sbmpc.filter import MovingAverage
 
 
-input_max = jnp.array([2, 4])
+input_max = jnp.array([1, 1])
 input_min = -input_max
 
 
 @jax.jit
-def unicycle_dynamics(state: jnp.array, inputs: jnp.array) -> jnp.array:
+def unicycle_dynamics(state, inputs, params):
     state_dot = jnp.array([inputs[0] * jnp.cos(state[2]),
                            inputs[0] * jnp.sin(state[2]),
                            inputs[1]], dtype=jnp.float32)
@@ -27,7 +27,7 @@ class Objective(BaseObjective):
     def running_cost(self, state: jnp.array, inputs: jnp.array, reference: jnp.array) -> jnp.float32:
         """ Cost function to regulate the state to the desired value"""
         error = state[:2] - reference[:2]
-        return 5 * jnp.linalg.norm(error, ord=2) + jnp.linalg.norm(inputs, ord=2)
+        return 1 * jnp.linalg.norm(error, ord=2) + jnp.linalg.norm(inputs, ord=2)
 
     def final_cost(self, state, reference):
         error = state - reference
@@ -44,7 +44,7 @@ class Simulation(Simulator):
         time_start = time.time_ns()
         input_sequence = self.controller.command(self.current_state, x_des, shift_guess=True).block_until_ready()
         print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
-        ctrl = input_sequence[:self.model.nu]
+        ctrl = input_sequence[0, :]
 
         self.input_traj[self.iter, :] = ctrl
 
@@ -61,11 +61,14 @@ if __name__ == "__main__":
 
     config = Config()
     config.MPC["dt"] = 0.02
-    config.MPC["horizon"] = 50
-    config.MPC["std_dev_mppi"] = jnp.array([0.8, 0.75])
-    config.MPC["num_parallel_computations"] = 5000
+    config.MPC["horizon"] = 100
+    config.MPC["std_dev_mppi"] = jnp.array([0.1, 0.1])
+    config.MPC["num_parallel_computations"] = 2000
 
-    config.MPC["filter"] = MovingAverage(window_size=3, step_size=system.nu)
+    config.MPC["lambda"] = 5.0
+
+    config.MPC["smoothing"] = "Spline"
+    config.MPC["num_control_points"] = 5
 
     solver = SamplingBasedMPC(system, Objective(), config)
 
@@ -79,4 +82,5 @@ if __name__ == "__main__":
     plt.show()
     # Plot the input trajectory
     plt.plot(sim.input_traj)
+    plt.grid()
     plt.show()

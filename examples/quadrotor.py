@@ -12,10 +12,9 @@ from sbmpc.simulation import Simulator, MujocoVisualizer, Visualizer, construct_
 from sbmpc.geometry import skew, quat_product, quat2rotm, quat_inverse
 from sbmpc.filter import MovingAverage
 
-
-os.environ['XLA_FLAGS'] = (
-        '--xla_gpu_triton_gemm_any=True '
-    )
+os.environ['XLA_FLAGS'] = '--xla_gpu_triton_gemm_any=True'
+# Needed to remove warnings, to be investigated
+jax.config.update("jax_default_matmul_precision", "high")
 
 MODEL = "classic"
 SCENE_PATH = "bitcraze_crazyflie_2/scene.xml"
@@ -35,7 +34,7 @@ input_hover = jnp.array([mass*gravity, 0., 0., 0.], dtype=jnp.float32)
 
 
 @jax.jit
-def quadrotor_dynamics(state: jnp.array, inputs: jnp.array) -> jnp.array:
+def quadrotor_dynamics(state: jnp.array, inputs: jnp.array, params: jnp.array) -> jnp.array:
     """
     Simple quadrotor dynamics model with CoM placed at the geometric center
 
@@ -74,7 +73,6 @@ def quadrotor_dynamics(state: jnp.array, inputs: jnp.array) -> jnp.array:
     return state_dot
 
 
-
 class Objective(BaseObjective):
     """ Cost function for the Quadrotor regulation task"""
 
@@ -82,26 +80,28 @@ class Objective(BaseObjective):
         pos_err = state[0:3] - state_ref[0:3]
         att_err = quat_product(quat_inverse(state[3:7]), state_ref[3:7])[1:4]
         vel_err = state[7:10] - state_ref[7:10]
-        ang_vel_err = state[10:] - state_ref[10:]
+        ang_vel_err = state[10:13] - state_ref[10:13]
 
         return pos_err, att_err, vel_err, ang_vel_err
 
     def running_cost(self, state: jnp.array, inputs: jnp.array, reference) -> jnp.float32:
         state_ref = reference[:13]
-        input_ref = reference[13:]
+        state_ref = state_ref.at[7:10].set(-1*(state[0:3] - state_ref[0:3]))
+        input_ref = reference[13:13+4]
         pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, state_ref)
-        return (10 * pos_err.transpose() @ pos_err +
-                0.1 * att_err.transpose() @ att_err +
-                0.5 * vel_err.transpose() @ vel_err +
-                0.1 * ang_vel_err.transpose() @ ang_vel_err +
-                (inputs-input_ref).transpose() @ jnp.diag(jnp.array([0.1, 0.1, 0.1, 0.5])) @ (inputs-input_ref))
+        return (5 * vel_err.transpose() @ vel_err +
+                1 * ang_vel_err.transpose() @ ang_vel_err +
+                (inputs-input_ref).transpose() @ jnp.diag(jnp.array([10, 10, 10, 100])) @ (inputs-input_ref))
 
     def final_cost(self, state, reference):
         pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, reference[:13])
-        return (100 * pos_err.transpose() @ pos_err +
+        return (10 * pos_err.transpose() @ pos_err +
                 1 * att_err.transpose() @ att_err +
                 5 * vel_err.transpose() @ vel_err +
                 1 * ang_vel_err.transpose() @ ang_vel_err)
+
+    # def constraints(self, state, inputs, reference):
+    #     return state[0] - 0.4
 
 
 class Simulation(Simulator):
@@ -120,10 +120,10 @@ class Simulation(Simulator):
         # Compute the optimal input sequence
         time_start = time.time_ns()
         input_sequence = self.controller.command(self.current_state_vec(), reference, num_steps=1).block_until_ready()
-        print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
-        ctrl = input_sequence[:self.model.nu]
+        ctrl = input_sequence[0, :].block_until_ready()
 
         self.input_traj[self.iter, :] = ctrl
+        print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
 
         # Simulate the dynamics
         self.current_state = self.model.integrate(self.current_state, ctrl, self.controller.dt)
@@ -136,14 +136,19 @@ if __name__ == "__main__":
     config.general["visualize"] = True
     config.MPC["dt"] = 0.02
     config.MPC["horizon"] = 25
-    config.MPC["std_dev_mppi"] = jnp.array([0.2, 0.3, 0.3, 0.15])
+    config.MPC["std_dev_mppi"] = 0.2*jnp.array([0.1, 0.1, 0.1, 0.05])
     config.MPC["num_parallel_computations"] = 2000
     config.MPC["initial_guess"] = input_hover
 
-    config.MPC["filter"] = MovingAverage(window_size=3, step_size=4)  # step_size is the number of inputs
+    config.MPC["lambda"] = 50.0
+
+    config.MPC["smoothing"] = "Spline"
+    config.MPC["num_control_points"] = 5
+
+    config.MPC["gains"] = False
 
     if MODEL == "classic":
-        system = Model(quadrotor_dynamics, nq=7, nv=6, nu=4, input_bounds=[input_min, input_max])
+        system = Model(quadrotor_dynamics, nq=7, nv=6, nu=4, input_bounds=[input_min, input_max], integrator_type="si_euler")
         q_init = jnp.array([0., 0., 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
         x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
         state_init = x_init
@@ -157,25 +162,26 @@ if __name__ == "__main__":
 
     solver = SamplingBasedMPC(system, Objective(), config)
 
-    reference = jnp.concatenate((x_init, input_hover))
-
     # dummy for jitting
-    input_sequence = solver.command(x_init, reference).block_until_ready()
+    action = solver.command(x_init, jnp.concatenate((x_init, input_hover)), False).block_until_ready()
     visualize = config.general["visualize"]
 
     # Setup and run the simulation
     sim = Simulation(state_init, system, solver, 500, visualize)
     sim.simulate()
 
+    time_vect = config.MPC["dt"]*jnp.arange(sim.state_traj.shape[0])
     ax = plt.figure().add_subplot(projection='3d')
     # Plot x-y-z position of the robot
     ax.plot(sim.state_traj[:, 0], sim.state_traj[:, 1], sim.state_traj[:, 2])
     plt.show()
-    plt.plot(sim.state_traj[:, 0:3])
+    plt.plot(time_vect, sim.state_traj[:, 0:3])
     plt.legend(["x", "y", "z"])
     plt.grid()
     plt.show()
     # Plot the input trajectory
-    plt.plot(sim.input_traj)
+    plt.plot(time_vect[:-1], sim.input_traj)
     plt.legend(["F", "t_x", "t_y", "t_z"])
+    plt.grid()
+
     plt.show()

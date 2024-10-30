@@ -34,7 +34,7 @@ input_hover = jnp.array([mass*gravity, 0., 0., 0.], dtype=jnp.float32)
 SCENE_PATH = "bitcraze_crazyflie_2/scene.xml"
 
 @jax.jit
-def quadrotor_dynamics(state: jnp.array, inputs: jnp.array) -> jnp.array:
+def quadrotor_dynamics(state: jnp.array, inputs: jnp.array, params) -> jnp.array:
     """
     Simple quadrotor dynamics model with CoM placed at the geometric center
 
@@ -87,19 +87,18 @@ class Objective(BaseObjective):
 
     def running_cost(self, state: jnp.array, inputs: jnp.array, reference) -> jnp.float32:
         state_ref = reference[:13]
+        state_ref = state_ref.at[7:10].set(-1*(state[0:3] - state_ref[0:3]))
         input_ref = reference[13:]
         pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, state_ref)
-        return (10 * pos_err.transpose() @ pos_err +
-                1 * att_err.transpose() @ att_err +
-                5 * vel_err.transpose() @ vel_err +
-                1 * ang_vel_err.transpose() @ ang_vel_err +
-                (inputs-input_ref).transpose() @ jnp.diag(jnp.array([0.1, 0.1, 0.1, 0.5])) @ (inputs-input_ref))
+        return (10 * vel_err.transpose() @ vel_err +
+                0.5 * ang_vel_err.transpose() @ ang_vel_err +
+                (inputs-input_ref).transpose() @ jnp.diag(jnp.array([1, 1, 1, 100])) @ (inputs-input_ref))
 
     def final_cost(self, state, reference):
         pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, reference[:13])
-        return (100 * pos_err.transpose() @ pos_err +
-                50 * att_err.transpose() @ att_err +
-                50 * vel_err.transpose() @ vel_err +
+        return (10 * pos_err.transpose() @ pos_err +
+                1 * att_err.transpose() @ att_err +
+                1 * vel_err.transpose() @ vel_err +
                 1 * ang_vel_err.transpose() @ ang_vel_err)
 
 
@@ -134,11 +133,13 @@ if __name__ == "__main__":
     config.general["visualize"] = False
     config.MPC["dt"] = 0.02
     config.MPC["horizon"] = 25
-    config.MPC["std_dev_mppi"] = jnp.array([0.2, 0.3, 0.3, 0.15])
-    config.MPC["num_parallel_computations"] = 2000
+    config.MPC["std_dev_mppi"] = 0.2*jnp.array([0.2, 0.3, 0.3, 0.15])
+    config.MPC["num_parallel_computations"] = 5000
     config.MPC["initial_guess"] = input_hover
+    config
 
-    config.MPC["filter"] = MovingAverage(window_size=3, step_size=4)  # step_size is the number of inputs
+    config.MPC["smoothing"] = "Spline"
+    config.MPC["num_control_points"] = 5
 
     config.MPC["gains"] = True
 
@@ -151,7 +152,7 @@ if __name__ == "__main__":
 
     reference = jnp.concatenate((x_init, input_hover))
 
-    input_sequence = solver.command(x_init, reference).block_until_ready()
+    input_sequence = solver.command(x_init, reference, shift_guess=False).block_until_ready()
 
     # Setup and run the simulation
     sim = Simulation(state_init, system, solver, 500, config.general["visualize"])

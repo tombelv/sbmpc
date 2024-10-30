@@ -27,7 +27,7 @@ input_hover = jnp.array([mass*gravity, 0., 0., 0.], dtype=jnp.float32)
 
 
 @jax.jit
-def quadrotor_dynamics(state: jnp.array, inputs: jnp.array) -> jnp.array:
+def quadrotor_dynamics(state: jnp.array, inputs: jnp.array, params) -> jnp.array:
     """
     Simple quadrotor dynamics model with CoM placed at the geometric center
 

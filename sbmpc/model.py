@@ -6,11 +6,12 @@ from mujoco import mjx
 
 
 class BaseModel(ABC):
-    def __init__(self, nq: int, nv: int, nu: int, input_bounds=(-jnp.inf, jnp.inf)):
+    def __init__(self, nq: int, nv: int, nu: int, np=0, input_bounds=(-jnp.inf, jnp.inf)):
         self.nq = nq  # number of generalized coordinates = dim(qpos)
         self.nv = nv  # number of degrees of freedom = dim(qvel)
         self.nx = nq + nv
         self.nu = nu  # number of control inputs
+        self.np = np
         if jnp.array_equal(input_bounds, (-jnp.inf, jnp.inf)):
             self.input_min = input_bounds[0]*jnp.ones(self.nu, dtype=jnp.float32)
             self.input_max = input_bounds[1]*jnp.ones(self.nu, dtype=jnp.float32)
@@ -21,72 +22,113 @@ class BaseModel(ABC):
     def get_nq(self):
         return self.nq
 
+        self.nominal_parameters = jnp.array([])
+
     def integrate(self, state, inputs, dt):
         pass
 
     def integrate_rollout(self, state, inputs, dt):
         pass
 
+    def integrate_rollout_single(self, state, inputs, dt):
+        pass
+
+    def sensitivity_step(self, state, inputs, params, state_sensitivity, input_sensitivity, dt):
+        pass
 
 
-class Model(BaseModel):
-    def __init__(self, model_dynamics,
+class ModelParametric(BaseModel):
+    def __init__(self, model_dynamics_parametric,
                  nq: int,
                  nv: int,
                  nu: int,
+                 np=0,
                  input_bounds=(-jnp.inf, jnp.inf),
                  integrator_type="si_euler"):
 
-        super().__init__(nq, nv, nu, input_bounds)
+        super().__init__(nq, nv, nu, np, input_bounds)
 
-        self.state0 = jnp.zeros(self.nx, dtype=jnp.float32)  # initstate
-        self.dynamics = model_dynamics
+        self.dynamics_parametric = model_dynamics_parametric
 
         if integrator_type == "si_euler":
-            self.integrate = self.integrate_si_euler
+            self.integrate_parametric = self.integrate_si_euler
         elif integrator_type == "euler":
-            self.integrate = self.integrate_euler
+            self.integrate_parametric = self.integrate_euler
         elif integrator_type == "rk4":
-            self.integrate = self.integrate_rk4
+            self.integrate_parametric = self.integrate_rk4
         elif integrator_type == "custom_discrete":
-            self.integrate = model_dynamics
+            self.integrate_parametric = model_dynamics_parametric
         else:
             raise ValueError("""
             Integrator type not supported.
             Available types: si_euler, euler, rk4, custom_discrete
             """)
 
-        integrate_vect = jax.vmap(self.integrate, in_axes=(0, 0, None))
-        self.integrate_rollout = jax.jit(integrate_vect)
+        self.partial_sens_all = jax.jacfwd(self.integrate_parametric, argnums=(0, 1, 2))
 
-
-
-    def integrate_rk4(self, state, inputs, dt: float):
+    def integrate_rk4(self, state, inputs, params, dt: float):
         """
         One-step integration of the dynamics using Rk4 method
         """
-        k1 = self.dynamics(state, inputs)
-        k2 = self.dynamics(state + k1*dt/2., inputs)
-        k3 = self.dynamics(state + k2 * dt / 2., inputs)
-        k4 = self.dynamics(state + k3 * dt, inputs)
+        k1 = self.dynamics_parametric(state, inputs, params)
+        k2 = self.dynamics_parametric(state + k1*dt/2., inputs, params)
+        k3 = self.dynamics_parametric(state + k2 * dt / 2., inputs, params)
+        k4 = self.dynamics_parametric(state + k3 * dt, inputs, params)
         return state + (dt/6.) * (k1 + 2. * k2 + 2. * k3 + k4)
 
-    def integrate_euler(self, state, inputs, dt: float):
+    def integrate_euler(self, state, inputs, params, dt: float):
         """
         One-step integration of the dynamics using Euler method
         """
-        return state + dt * self.dynamics(state, inputs)
+        return state + dt * self.dynamics_parametric(state, inputs, params)
 
-    def integrate_si_euler(self, state, inputs, dt: float):
+    def integrate_si_euler(self, state, inputs, params, dt: float):
         """
         Semi-implicit Euler integration.
-
         As of now this is probably implemented inefficiently because the whole dynamics is evaluated two times.
         """
-        v_kp1 = state[self.nq:] + dt * self.dynamics(state, inputs)[self.nq:]
+        v_kp1 = state[self.nq:] + dt * self.dynamics_parametric(state, inputs, params)[self.nq:]
         return jnp.concatenate([
-                    state[:self.nq] + dt * self.dynamics(jnp.concatenate([state[:self.nq], v_kp1]), inputs)[:self.nq],
+                    state[:self.nq] + dt * self.dynamics_parametric(jnp.concatenate([state[:self.nq], v_kp1]), inputs, params)[:self.nq],
                     v_kp1])
+
+    def sensitivity_step(self, state, inputs, params, state_sensitivity, input_sensitivity, dt):
+
+        p_sens_all = self.partial_sens_all(state, inputs, params, dt)
+        p_sens_state = p_sens_all[0]
+        p_sens_inputs = p_sens_all[1]
+        p_sens_params = p_sens_all[2]
+
+        return p_sens_state @ state_sensitivity + p_sens_inputs @ input_sensitivity + p_sens_params
+
+
+class Model(ModelParametric):
+    def __init__(self, model_dynamics,
+                 nq: int,
+                 nv: int,
+                 nu: int,
+                 nominal_parameters=jnp.array([]),
+                 input_bounds=(-jnp.inf, jnp.inf),
+                 integrator_type="si_euler"):
+        """
+        :param model_dynamics: Should have signature (state, inputs, params)
+        :param nq: Number of configuration variables
+        :param nv: Number of pseudo velocities
+        :param nu: Number of inputs
+        :param nominal_parameters: Note that nominal parameters are baked in from the start due to jitting
+        :param input_bounds: Lower and upper bound of the inputs
+        :param integrator_type: Available integrators are [si_euler, euler, rk4, custom_discrete]
+        """
+
+        super().__init__(model_dynamics, nq, nv, nu, len(nominal_parameters), input_bounds, integrator_type)
+
+        self.nominal_parameters = nominal_parameters
+
+        self.integrate_rollout_single = jax.jit(self.integrate)
+
+    def integrate(self, state, inputs, dt):
+        return self.integrate_parametric(state, inputs, self.nominal_parameters, dt)
+
 
 
 class ModelMjx(BaseModel):
@@ -103,7 +145,7 @@ class ModelMjx(BaseModel):
         else:
             input_bounds = [input_bounds[0], input_bounds[1]]
 
-        super().__init__(self.mj_model.nq, self.mj_model.nv, self.mj_model.nu, input_bounds)
+        super().__init__(self.mj_model.nq, self.mj_model.nv, self.mj_model.nu, input_bounds=input_bounds)
         self.mj_data = mujoco.MjData(self.mj_model)
         # self.renderer = mujoco.Renderer(mj_model)
         self.model = mjx.put_model(self.mj_model)
@@ -114,13 +156,15 @@ class ModelMjx(BaseModel):
             integrate_vect = jax.vmap(self._integrate_kinematic, in_axes=(0, 0, None))
             self.integrate_rollout = jax.jit(integrate_vect)
             self.integrate = jax.jit(self._integrate_kinematic)
+            self.integrate_rollout_single = self.integrate
         else:
             integrate_vect = jax.vmap(self._integrate, in_axes=(0, 0, None))
             self.integrate_rollout = jax.jit(integrate_vect)
             self.integrate = jax.jit(self._integrate_mjx)
+            self.integrate_rollout_single = self._integrate
 
 
-    # here we need to work on data that are already on the gpu
+    # here we need to work on data that is already on the gpu
     def _integrate_mjx(self, state: mjx.Data, inputs: jnp.array, dt: float):
         state_next = state.replace(ctrl=inputs)
         state_next = mjx.step(self.model, state_next)

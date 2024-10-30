@@ -1,7 +1,5 @@
 import jax.numpy as jnp
 import jax
-import numpy as np
-
 
 @jax.jit
 def skew(vec):
