@@ -27,7 +27,7 @@ class ConfigMPC:
 
 class Config:
     def __init__(self):
-        self.general = {"dtype": jnp.float32, "device": jax.devices()[0]}
+        self.general = {"dtype": jnp.float32, "device": jax.devices()[0], "visualize": False}
         self.MPC = {"dt": 0.0,
                     "horizon": 1,
                     "num_parallel_computations": 1000,

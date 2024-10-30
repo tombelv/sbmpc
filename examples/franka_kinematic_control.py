@@ -5,8 +5,9 @@ import jax.numpy as jnp
 
 from sbmpc import  ModelMjx, SamplingBasedMPC, BaseObjective
 from sbmpc.settings import Config
-from sbmpc.simulation import Simulator
+from sbmpc.simulation import Simulator, MujocoVisualizer, Visualizer, construct_mj_visualizer_from_model
 from sbmpc.filter import MovingAverage
+from typing import Optional
 
 import mujoco.mjx as mjx
 import mujoco
@@ -14,6 +15,8 @@ import mujoco
 os.environ['XLA_FLAGS'] = (
         '--xla_gpu_triton_gemm_any=True '
     )
+
+SCENE_PATH = "franka_emika_panda/scene.xml"
 
 
 
@@ -41,8 +44,15 @@ class Objective(BaseObjective):
 
 
 class Simulation(Simulator):
-    def __init__(self, initial_state, model, controller, num_iterations, visualize):
-        super().__init__(initial_state, model, controller, num_iterations, visualize)
+    def __init__(self, initial_state, model, controller, num_iterations: int, visualize: bool = False):
+        visualizer = None
+        if visualize:
+            visualizer = construct_mj_visualizer_from_model(model, SCENE_PATH)
+        super().__init__(initial_state, model, controller, num_iterations, visualizer)
+
+    def run_kinematics(self):
+        mujoco.mj_kinematics(
+                            self.model.mj_model, self.model.mj_data)
 
     def update(self):
         ee_des = jnp.array([-0.5, 0.4, 0.3], dtype=jnp.float32)  # hovering position
@@ -56,6 +66,7 @@ class Simulation(Simulator):
         # Simulate the dynamics
         self.current_state = self.model.integrate(self.current_state, ctrl, self.controller.dt)
         self.state_traj[self.iter + 1, :] = self.current_state_vec()
+        self.run_kinematics()
 
         print("EE position = ", self.controller.objective.compute_ee_pos(self.current_state))
 
@@ -63,6 +74,7 @@ class Simulation(Simulator):
 if __name__ == "__main__":
 
     config = Config()
+    config.general["visualize"] = False
     config.MPC["dt"] = 0.02
     config.MPC["horizon"] = 25
     config.MPC["std_dev_mppi"] = 0.2*jnp.ones(7)
@@ -71,7 +83,7 @@ if __name__ == "__main__":
     config.MPC["filter"] = MovingAverage(window_size=3, step_size=7)
 
 
-    system = ModelMjx("franka_emika_panda/scene.xml", kinematic=True)
+    system = ModelMjx(SCENE_PATH, kinematic=True)
     system.set_qpos(system.mj_model.key_qpos[mujoco.mj_name2id(system.mj_model, mujoco.mjtObj.mjOBJ_KEY.value, "home")])
     q_init = system.data.qpos
     print("Initial configuration = ", q_init)
@@ -82,7 +94,7 @@ if __name__ == "__main__":
     solver.command(q_init, jnp.zeros(3)).block_until_ready()
 
     # Setup and run the simulation
-    sim = Simulation(q_init, system, solver, 5000, visualize=True)
+    sim = Simulation(q_init, system, solver, 5000, visualize=config.general["visualize"])
     sim.simulate()
 
 

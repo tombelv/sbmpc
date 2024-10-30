@@ -35,7 +35,7 @@ class Objective(BaseObjective):
 
 
 class Simulation(Simulator):
-    def __init__(self, initial_state, model, controller, num_iterations):
+    def __init__(self, initial_state, model, controller, num_iterations: int):
         super().__init__(initial_state, model, controller, num_iterations)
 
     def update(self):
