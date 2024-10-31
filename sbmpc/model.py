@@ -18,11 +18,11 @@ class BaseModel(ABC):
         else:
             self.input_min = input_bounds[0]
             self.input_max = input_bounds[1]
+
+        self.nominal_parameters = jnp.array([])
     
     def get_nq(self):
         return self.nq
-
-        self.nominal_parameters = jnp.array([])
 
     def integrate(self, state, inputs, dt):
         pass
