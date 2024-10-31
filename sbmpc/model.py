@@ -1,3 +1,5 @@
+from typing import Optional, Dict
+
 import jax
 import jax.numpy as jnp
 from abc import ABC, abstractmethod
@@ -44,7 +46,8 @@ class ModelParametric(BaseModel):
                  nu: int,
                  np=0,
                  input_bounds=(-jnp.inf, jnp.inf),
-                 integrator_type="si_euler"):
+                 integrator_type="si_euler",
+                 integrator_params: Optional[Dict] = None):
 
         super().__init__(nq, nv, nu, np, input_bounds)
 
@@ -61,7 +64,7 @@ class ModelParametric(BaseModel):
         else:
             raise ValueError("""
             Integrator type not supported.
-            Available types: si_euler, euler, rk4, custom_discrete
+            Available types: si_euler, euler, rk4, custom_discrete, mjx
             """)
 
         self.partial_sens_all = jax.jacfwd(self.integrate_parametric, argnums=(0, 1, 2))

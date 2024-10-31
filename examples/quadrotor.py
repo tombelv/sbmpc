@@ -1,14 +1,14 @@
-import time, os
-from typing import Optional
+import os
 
 import jax
 import jax.numpy as jnp
 
 import matplotlib.pyplot as plt
 
-from sbmpc import Model, ModelMjx, SamplingBasedMPC, BaseObjective
-from sbmpc.settings import Config
-from sbmpc.simulation import Simulator, MujocoVisualizer, Visualizer, construct_mj_visualizer_from_model
+from sbmpc import BaseObjective
+import sbmpc.settings as settings
+
+from sbmpc.simulation import build_all
 from sbmpc.geometry import skew, quat_product, quat2rotm, quat_inverse
 from sbmpc.filter import MovingAverage
 
@@ -19,19 +19,18 @@ jax.config.update("jax_default_matmul_precision", "high")
 MODEL = "classic"
 SCENE_PATH = "bitcraze_crazyflie_2/scene.xml"
 
-input_max = jnp.array([1, 2.5, 2.5, 2])
-input_min = jnp.array([0, -2.5, -2.5, -2])
+INPUT_MAX = jnp.array([1, 2.5, 2.5, 2])
+INPUT_MIN = jnp.array([0, -2.5, -2.5, -2])
 
-mass = 0.027
-gravity = 9.81
-inertia = jnp.array([2.3951e-5, 2.3951e-5, 3.2347e-5], dtype=jnp.float32)
-inertia_mat = jnp.diag(inertia)
+MASS = 0.027
+GRAVITY = 9.81
+INERTIA = jnp.array([2.3951e-5, 2.3951e-5, 3.2347e-5], dtype=jnp.float32)
+INERTIA_MAT = jnp.diag(INERTIA)
 
-spatial_inertia_mat = jnp.diag(jnp.concatenate([mass*jnp.ones(3, dtype=jnp.float32), inertia]))
-spatial_inertia_mat_inv = jnp.linalg.inv(spatial_inertia_mat)
+SPATIAL_INTERTIA_MAT = jnp.diag(jnp.concatenate([MASS*jnp.ones(3, dtype=jnp.float32), INERTIA]))
+SPATIAL_INTERTIA_MAT_INV = jnp.linalg.inv(SPATIAL_INTERTIA_MAT)
 
-input_hover = jnp.array([mass*gravity, 0., 0., 0.], dtype=jnp.float32)
-
+INPUT_HOVER = jnp.array([MASS*GRAVITY, 0., 0., 0.], dtype=jnp.float32)
 
 @jax.jit
 def quadrotor_dynamics(state: jnp.array, inputs: jnp.array, params: jnp.array) -> jnp.array:
@@ -59,11 +58,11 @@ def quadrotor_dynamics(state: jnp.array, inputs: jnp.array, params: jnp.array) -
     orientation_mat = quat2rotm(quat)
     ang_vel_quat = jnp.array([0., state[10], state[11], state[12]])
 
-    total_force = jnp.array([0., 0., inputs[0]]) - mass*gravity*orientation_mat[2, :]  # transpose + 3rd col = 3rd row
+    total_force = jnp.array([0., 0., inputs[0]]) - MASS*GRAVITY*orientation_mat[2, :]  # transpose + 3rd col = 3rd row
 
-    total_torque = 1e-3*inputs[1:4] - skew(ang_vel) @ inertia_mat @ ang_vel  # multiplication by normalization factor
+    total_torque = 1e-3*inputs[1:4] - skew(ang_vel) @ INERTIA_MAT @ ang_vel  # multiplication by normalization factor
 
-    acc = spatial_inertia_mat_inv @ jnp.concatenate([total_force, total_torque])
+    acc = SPATIAL_INTERTIA_MAT_INV @ jnp.concatenate([total_force, total_torque])
 
     state_dot = jnp.concatenate([state[7:10],
                                  0.5 * quat_product(quat, ang_vel_quat),
@@ -104,70 +103,47 @@ class Objective(BaseObjective):
     #     return state[0] - 0.4
 
 
-class Simulation(Simulator):
-    def __init__(self, initial_state, model, controller, num_iterations: int, visualize: bool = True):
-        visualizer = None
-        if visualize:
-            visualizer = construct_mj_visualizer_from_model(model, SCENE_PATH)
-
-        super().__init__(initial_state, model, controller, num_iterations, visualizer)
-
-    def update(self):
-        q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
-        x_des = jnp.concatenate([q_des, jnp.zeros(self.model.nv, dtype=jnp.float32)], axis=0)
-
-        reference = jnp.concatenate((x_des, input_hover))
-        # Compute the optimal input sequence
-        time_start = time.time_ns()
-        input_sequence = self.controller.command(self.current_state_vec(), reference, num_steps=1).block_until_ready()
-        ctrl = input_sequence[0, :].block_until_ready()
-
-        self.input_traj[self.iter, :] = ctrl
-        print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
-
-        # Simulate the dynamics
-        self.current_state = self.model.integrate(self.current_state, ctrl, self.controller.dt)
-        self.state_traj[self.iter + 1, :] = self.current_state_vec()
-
-
 if __name__ == "__main__":
 
-    config = Config()
+    config = settings.Config()
     config.general["visualize"] = True
     config.MPC["dt"] = 0.02
     config.MPC["horizon"] = 25
     config.MPC["std_dev_mppi"] = 0.2*jnp.array([0.1, 0.1, 0.1, 0.05])
     config.MPC["num_parallel_computations"] = 2000
-    config.MPC["initial_guess"] = input_hover
-
+    config.MPC["initial_guess"] = INPUT_HOVER
     config.MPC["lambda"] = 50.0
-
     config.MPC["smoothing"] = "Spline"
     config.MPC["num_control_points"] = 5
-
     config.MPC["gains"] = False
+    config.MPC["filter"] = MovingAverage(window_size=3, step_size=4)  # step_size is the number of inputs
 
-    if MODEL == "classic":
-        system = Model(quadrotor_dynamics, nq=7, nv=6, nu=4, input_bounds=[input_min, input_max], integrator_type="si_euler")
-        q_init = jnp.array([0., 0., 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
-        x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
-        state_init = x_init
-    elif MODEL == "mjx":
-        system = ModelMjx(SCENE_PATH)
-        q_init = system.data.qpos
-        x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
-        state_init = system.data
-    else:
-        raise ValueError("Model must be either 'classic' or 'mjx'")
+    config.robot[settings.ROBOT_SCENE_PATH_KEY] = SCENE_PATH
+    config.robot[settings.ROBOT_NQ_KEY] = 7
+    config.robot[settings.ROBOT_NV_KEY] = 6
+    config.robot[settings.ROBOT_NU_KEY] = 4
+    config.robot[settings.ROBOT_INPUT_MIN_KEY] = INPUT_MIN
+    config.robot[settings.ROBOT_INPUT_MAX_KEY] = INPUT_MAX
+    config.robot[settings.ROBOT_Q_INIT_KEY] = jnp.array([0., 0., 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
 
-    solver = SamplingBasedMPC(system, Objective(), config)
+    config.solver[settings.SOLVER_DYNAMICS_MODEL_KEY] = settings.DynamicsModel.CLASSIC
+    config.simulation[settings.SIMULATION_DYNAMICS_MODEL_KEY] = settings.DynamicsModel.MJX
 
-    # dummy for jitting
-    action = solver.command(x_init, jnp.concatenate((x_init, input_hover)), False).block_until_ready()
-    visualize = config.general["visualize"]
+    # x_init = jnp.concatenate([config.robot[settings.ROBOT_Q_INIT_KEY],
+    #                  jnp.zeros(config.robot[settings.ROBOT_NV_KEY], dtype=jnp.float32)], axis=0)
+    # reference = jnp.concatenate((x_init, INPUT_HOVER))
 
-    # Setup and run the simulation
-    sim = Simulation(state_init, system, solver, 500, visualize)
+    q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
+    x_des = jnp.concatenate([q_des, jnp.zeros(config.robot[settings.ROBOT_NV_KEY], dtype=jnp.float32)], axis=0)
+
+    reference = jnp.concatenate((x_des, INPUT_HOVER))
+
+    objective = Objective()
+
+    sim = build_all(config, objective,
+                    reference,
+                    custom_dynamics_fn=quadrotor_dynamics)
+
     sim.simulate()
 
     time_vect = config.MPC["dt"]*jnp.arange(sim.state_traj.shape[0])
