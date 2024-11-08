@@ -176,13 +176,14 @@ class Simulator(ABC):
         self.update()
         self.iter += 1
 
+ROBOT_SCENE_PATH_KEY = "robot_scene_path"
 
 class Simulation(Simulator):
     def __init__(self, initial_state, model, controller, const_reference: jnp.array, num_iterations: int, visualize: bool = True, visualize_params: Optional[Dict] = None):
         self.const_reference = const_reference
         visualizer = None
         if visualize:
-            scene_path = visualize_params.get(settings.ROBOT_SCENE_PATH_KEY, None)
+            scene_path = visualize_params.get(ROBOT_SCENE_PATH_KEY, None)
             if visualize_params is None or scene_path is None:
                 raise ValueError("if visualizing need to input scene path for mjx")
             visualizer = construct_mj_visualizer_from_model(model, scene_path)
@@ -203,23 +204,23 @@ class Simulation(Simulator):
         self.state_traj[self.iter + 1, :] = self.current_state_vec()
 
 
-def build_classic_model(custom_dynamics_fn: Callable, nq: int, nv: int, nu: int, input_min: jnp.array, input_max: jnp.array,
-                        q_init: jnp.array) -> Tuple[BaseModel, jnp.array, jnp.array]:
-    system = Model(custom_dynamics_fn, nq=nq, nv=nv, nu=nu, input_bounds=[input_min, input_max])
+def build_custom_model(custom_dynamics_fn: Callable, nq: int, nv: int, nu: int, input_min: jnp.array, input_max: jnp.array,
+                        q_init: jnp.array, integrator_type: str ="si_euler") -> Tuple[BaseModel, jnp.array, jnp.array]:
+    system = Model(custom_dynamics_fn, nq=nq, nv=nv, nu=nu, input_bounds=[input_min, input_max], integrator_type=integrator_type)
     x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
     state_init = x_init
     return system, x_init, state_init
 
 
-def build_mjx_model(scene_path: str) -> Tuple[BaseModel, jnp.array, jnp.array]:
-    system = ModelMjx(scene_path)
+def build_mjx_model(scene_path: str, kinematic: bool = False) -> Tuple[BaseModel, jnp.array, jnp.array]:
+    system = ModelMjx(scene_path, kinematic=kinematic)
     q_init = system.data.qpos
     x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
     state_init = system.data
     return system, x_init, state_init
 
 def build_model_from_config(model_type: settings.DynamicsModel, config: settings.Config, custom_dynamics_fn: Optional[Callable] = None):
-    if model_type == settings.DynamicsModel.CLASSIC:
+    if model_type == settings.DynamicsModel.CUSTOM:
         if custom_dynamics_fn is None:
             raise ValueError("for classic dynamics model, a custom dynamics function must be passed. See examples.")
         nq = config.robot.nq
@@ -228,11 +229,20 @@ def build_model_from_config(model_type: settings.DynamicsModel, config: settings
         input_min = config.robot.input_min
         input_max = config.robot.input_max
         q_init = config.robot.q_init
-        return build_classic_model(custom_dynamics_fn, nq, nv, nu, input_min, input_max, q_init)
+        integrator_type = config.general.integrator_type
+        return build_custom_model(custom_dynamics_fn, nq, nv, nu, input_min, input_max, q_init, integrator_type)
     elif model_type == settings.DynamicsModel.MJX:
-        return build_mjx_model(config.robot.robot_scene_path)
+        return build_mjx_model(config.robot.robot_scene_path, config.robot.mjx_kinematic)
     else:
         raise NotImplementedError
+
+def build_model_and_solver(config: settings.Config, objective: BaseObjective, custom_dynamics_fn: Optional[Callable] = None):
+    if config.solver_type != settings.Solver.MPPI:
+        raise NotImplementedError
+    solver_dynamics_model_setting = config.solver_dynamics
+    system, solver_x_init, sim_state_init = build_model_from_config(solver_dynamics_model_setting, config, custom_dynamics_fn)
+    solver = SamplingBasedMPC(system, objective, config)
+    return system, solver
 
 def build_all(config: settings.Config, objective: BaseObjective,
               reference: jnp.array,
@@ -259,8 +269,8 @@ def build_all(config: settings.Config, objective: BaseObjective,
     
     # dummy for jitting
     input_sequence = solver.command(solver_x_init, reference, False).block_until_ready()
-    visualize = config.general["visualize"]
-    visualizer_params = {settings.ROBOT_SCENE_PATH_KEY: config.robot.robot_scene_path}
+    visualize = config.general.visualize
+    visualizer_params = {ROBOT_SCENE_PATH_KEY: config.robot.robot_scene_path}
 
     # Setup and run the simulation
     num_iterations = config.sim_iterations

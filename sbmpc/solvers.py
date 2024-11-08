@@ -61,48 +61,47 @@ class SamplingBasedMPC:
         self.model = model
         self.objective = objective
 
-        config.setup()
         self.config = config
 
         # Sampling time for discrete time model
-        self.dt = config.MPC["dt"]
+        self.dt = config.MPC.dt
         # Control horizon of the MPC (steps)
-        self.horizon = config.MPC["horizon"]
+        self.horizon = config.MPC.horizon
         # Monte-carlo samples, that is the number of trajectories that are evaluated in parallel
-        self.num_parallel_computations = config.MPC["num_parallel_computations"]
+        self.num_parallel_computations = config.MPC.num_parallel_computations
 
-        self.lam = config.MPC["lambda"]
+        self.lam = config.MPC.lambda_mpc
 
-        self.compute_gains = config.MPC["gains"]
+        self.compute_gains = config.MPC.gains
         
         # Covariance of the input action
-        # self.sigma_mppi = jnp.diag(config.MPC["std_dev_mppi"]**2)
+        # self.sigma_mppi = jnp.diag(config.MPC.std_dev_mppi**2)
         
         # Total number of inputs over time (stored in a 1d vector)
         self.num_control_variables = model.nu * self.horizon
-        self.num_control_points = config.MPC["num_control_points"]
-        self.control_points_sparsity = self.horizon // config.MPC["num_control_points"]
+        self.num_control_points = config.MPC.num_control_points
+        self.control_points_sparsity = self.horizon // self.num_control_points
 
-        self.dtype_general = config.general["dtype"]
-        self.device = config.general["device"]
+        self.dtype_general = config.general.dtype
+        self.device = config.general.device
 
         self.input_max_full_horizon = jnp.tile(model.input_max, (self.horizon, 1))
         self.input_min_full_horizon = jnp.tile(model.input_min, (self.horizon, 1))
 
         self.clip_input = jax.jit(self.clip_input, device=self.device)
 
-        self.std_dev = config.MPC["std_dev_mppi"]
+        self.std_dev = config.MPC.std_dev_mppi
         self.std_dev_horizon = jnp.tile(self.std_dev, self.num_control_points)
 
         # Initialize the vector storing the current optimal input sequence
-        if config.MPC["initial_guess"] is None:
+        if config.MPC.initial_guess is None:
             self.initial_guess = 0.0 * self.std_dev
             self.best_control_vars = jnp.zeros((self.horizon,self.model.nu), dtype=self.dtype_general)
         else:
-            self.initial_guess = config.MPC["initial_guess"]
+            self.initial_guess = config.MPC.initial_guess
             self.best_control_vars = jnp.tile(self.initial_guess, (self.horizon, 1))
 
-        self.filter = config.MPC["filter"]
+        self.filter = config.MPC.filter
         if self.filter is not None:
             self.last_inputs_window = jnp.tile(self.initial_guess, self.filter.window_size//2)
         else:
@@ -142,7 +141,7 @@ class SamplingBasedMPC:
         curr_state = initial_state
         # rollout_states = jnp.zeros((self.horizon+1, self.model.nx), dtype=self.dtype_general)
         # rollout_states = rollout_states.at[0, :].set(initial_state)
-        if self.config.MPC["smoothing"] == "Spline":
+        if self.config.MPC.smoothing == "Spline":
             control_interp = cubic_spline_interpolation(jnp.arange(0, self.horizon, self.control_points_sparsity),
                                                         control_variables,
                                                         jnp.arange(0, self.horizon))
@@ -202,13 +201,13 @@ class SamplingBasedMPC:
 
         additional_random_parameters = self.sample_input_sequence(key)
 
-        if self.config.MPC["smoothing"] == "Spline":
+        if self.config.MPC.smoothing == "Spline":
             control_vars_all = best_control_vars[::self.control_points_sparsity, :] + additional_random_parameters
         else:
             control_vars_all = best_control_vars + additional_random_parameters
 
         # Do rollout
-        if self.config.MPC["sensitivity"]:
+        if self.config.MPC.sensitivity:
             costs, control_vars_all = self.rollout_with_sensitivity(state, reference, control_vars_all, gains)
         else:
             if self.compute_gains:

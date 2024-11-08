@@ -6,6 +6,8 @@ from abc import ABC, abstractmethod
 import mujoco
 from mujoco import mjx
 
+from sbmpc.settings import MODEL_PARAMETRIC_INTEGRATOR_TYPES
+
 
 class BaseModel(ABC):
     def __init__(self, nq: int, nv: int, nu: int, np=0, input_bounds=(-jnp.inf, jnp.inf)):
@@ -39,6 +41,7 @@ class BaseModel(ABC):
         pass
 
 
+
 class ModelParametric(BaseModel):
     def __init__(self, model_dynamics_parametric,
                  nq: int,
@@ -53,13 +56,13 @@ class ModelParametric(BaseModel):
 
         self.dynamics_parametric = model_dynamics_parametric
 
-        if integrator_type == "si_euler":
+        if integrator_type == MODEL_PARAMETRIC_INTEGRATOR_TYPES[0]:
             self.integrate_parametric = self.integrate_si_euler
-        elif integrator_type == "euler":
+        elif integrator_type == MODEL_PARAMETRIC_INTEGRATOR_TYPES[1]:
             self.integrate_parametric = self.integrate_euler
-        elif integrator_type == "rk4":
+        elif integrator_type == MODEL_PARAMETRIC_INTEGRATOR_TYPES[2]:
             self.integrate_parametric = self.integrate_rk4
-        elif integrator_type == "custom_discrete":
+        elif integrator_type == MODEL_PARAMETRIC_INTEGRATOR_TYPES[3]:
             self.integrate_parametric = model_dynamics_parametric
         else:
             raise ValueError("""

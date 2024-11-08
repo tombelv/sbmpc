@@ -106,17 +106,17 @@ class Objective(BaseObjective):
 if __name__ == "__main__":
 
     config = settings.Config()
-    config.general["visualize"] = True
-    config.MPC["dt"] = 0.02
-    config.MPC["horizon"] = 25
-    config.MPC["std_dev_mppi"] = 0.2*jnp.array([0.1, 0.1, 0.1, 0.05])
-    config.MPC["num_parallel_computations"] = 2000
-    config.MPC["initial_guess"] = INPUT_HOVER
-    config.MPC["lambda"] = 50.0
-    config.MPC["smoothing"] = "Spline"
-    config.MPC["num_control_points"] = 5
-    config.MPC["gains"] = False
-    config.MPC["filter"] = MovingAverage(window_size=3, step_size=4)  # step_size is the number of inputs
+    config.general.visualize = True
+    config.MPC.dt = 0.02
+    config.MPC.nu = 4
+    config.MPC.horizon = 25
+    config.MPC.std_dev_mppi = 0.2*jnp.array([0.1, 0.1, 0.1, 0.05])
+    config.MPC.num_parallel_computations = 2000
+    config.MPC.initial_guess = INPUT_HOVER
+    config.MPC.lambda_mpc = 50.0
+    config.MPC.smoothing = "Spline"
+    config.MPC.num_control_points = 5
+    config.MPC.gains = False
 
     config.robot.robot_scene_path = SCENE_PATH
     config.robot.nq = 7
@@ -126,7 +126,7 @@ if __name__ == "__main__":
     config.robot.input_max = INPUT_MAX
     config.robot.q_init = jnp.array([0., 0., 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
 
-    config.solver_dynamics = settings.DynamicsModel.CLASSIC
+    config.solver_dynamics = settings.DynamicsModel.CUSTOM
     config.sim_dynamics = settings.DynamicsModel.MJX
 
     # x_init = jnp.concatenate([config.robot[settings.ROBOT_Q_INIT_KEY],
@@ -146,7 +146,7 @@ if __name__ == "__main__":
 
     sim.simulate()
 
-    time_vect = config.MPC["dt"]*jnp.arange(sim.state_traj.shape[0])
+    time_vect = config.MPC.dt*jnp.arange(sim.state_traj.shape[0])
     ax = plt.figure().add_subplot(projection='3d')
     # Plot x-y-z position of the robot
     ax.plot(sim.state_traj[:, 0], sim.state_traj[:, 1], sim.state_traj[:, 2])
