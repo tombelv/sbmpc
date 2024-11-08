@@ -222,15 +222,15 @@ def build_model_from_config(model_type: settings.DynamicsModel, config: settings
     if model_type == settings.DynamicsModel.CLASSIC:
         if custom_dynamics_fn is None:
             raise ValueError("for classic dynamics model, a custom dynamics function must be passed. See examples.")
-        nq = config.robot[settings.ROBOT_NQ_KEY]
-        nv = config.robot[settings.ROBOT_NV_KEY]
-        nu = config.robot[settings.ROBOT_NU_KEY]
-        input_min = config.robot[settings.ROBOT_INPUT_MIN_KEY]
-        input_max = config.robot[settings.ROBOT_INPUT_MAX_KEY]
-        q_init = config.robot[settings.ROBOT_Q_INIT_KEY]
+        nq = config.robot.nq
+        nv = config.robot.nv
+        nu = config.robot.nu
+        input_min = config.robot.input_min
+        input_max = config.robot.input_max
+        q_init = config.robot.q_init
         return build_classic_model(custom_dynamics_fn, nq, nv, nu, input_min, input_max, q_init)
     elif model_type == settings.DynamicsModel.MJX:
-        return build_mjx_model(config.robot[settings.ROBOT_SCENE_PATH_KEY])
+        return build_mjx_model(config.robot.robot_scene_path)
     else:
         raise NotImplementedError
 
@@ -238,8 +238,8 @@ def build_all(config: settings.Config, objective: BaseObjective,
               reference: jnp.array,
               custom_dynamics_fn: Optional[Callable] = None):
     system, x_init, state_init = (None, None, None)
-    solver_dynamics_model_setting = config.solver[settings.SOLVER_DYNAMICS_MODEL_KEY]
-    sim_dynamics_model_setting = config.simulation[settings.SIMULATION_DYNAMICS_MODEL_KEY]
+    solver_dynamics_model_setting = config.solver_dynamics
+    sim_dynamics_model_setting = config.sim_dynamics
 
     solver_dynamics_model, sim_dynamics_model = (None, None)
     solver_x_init, sim_state_init = (None, None)
@@ -252,7 +252,7 @@ def build_all(config: settings.Config, objective: BaseObjective,
         solver_dynamics_model = system
         sim_dynamics_model, _, sim_state_init = build_model_from_config(sim_dynamics_model_setting, config, custom_dynamics_fn)
 
-    if config.solver[settings.SOLVER_TYPE_KEY] != settings.Solver.MPPI:
+    if config.solver_type != settings.Solver.MPPI:
         raise NotImplementedError
 
     solver = SamplingBasedMPC(solver_dynamics_model, objective, config)
@@ -260,10 +260,10 @@ def build_all(config: settings.Config, objective: BaseObjective,
     # dummy for jitting
     input_sequence = solver.command(solver_x_init, reference, False).block_until_ready()
     visualize = config.general["visualize"]
-    visualizer_params = {settings.ROBOT_SCENE_PATH_KEY: config.robot[settings.ROBOT_SCENE_PATH_KEY]}
+    visualizer_params = {settings.ROBOT_SCENE_PATH_KEY: config.robot.robot_scene_path}
 
     # Setup and run the simulation
-    num_iterations = config.simulation[settings.SIMULATION_NUM_ITERATIONS_KEY]
+    num_iterations = config.sim_iterations
     sim = Simulation(sim_state_init, sim_dynamics_model, solver, reference, num_iterations, visualize, visualizer_params)
     return sim
 

@@ -118,23 +118,23 @@ if __name__ == "__main__":
     config.MPC["gains"] = False
     config.MPC["filter"] = MovingAverage(window_size=3, step_size=4)  # step_size is the number of inputs
 
-    config.robot[settings.ROBOT_SCENE_PATH_KEY] = SCENE_PATH
-    config.robot[settings.ROBOT_NQ_KEY] = 7
-    config.robot[settings.ROBOT_NV_KEY] = 6
-    config.robot[settings.ROBOT_NU_KEY] = 4
-    config.robot[settings.ROBOT_INPUT_MIN_KEY] = INPUT_MIN
-    config.robot[settings.ROBOT_INPUT_MAX_KEY] = INPUT_MAX
-    config.robot[settings.ROBOT_Q_INIT_KEY] = jnp.array([0., 0., 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
+    config.robot.robot_scene_path = SCENE_PATH
+    config.robot.nq = 7
+    config.robot.nv = 6
+    config.robot.nu = 4
+    config.robot.input_min = INPUT_MIN
+    config.robot.input_max = INPUT_MAX
+    config.robot.q_init = jnp.array([0., 0., 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
 
-    config.solver[settings.SOLVER_DYNAMICS_MODEL_KEY] = settings.DynamicsModel.CLASSIC
-    config.simulation[settings.SIMULATION_DYNAMICS_MODEL_KEY] = settings.DynamicsModel.MJX
+    config.solver_dynamics = settings.DynamicsModel.CLASSIC
+    config.sim_dynamics = settings.DynamicsModel.MJX
 
     # x_init = jnp.concatenate([config.robot[settings.ROBOT_Q_INIT_KEY],
     #                  jnp.zeros(config.robot[settings.ROBOT_NV_KEY], dtype=jnp.float32)], axis=0)
     # reference = jnp.concatenate((x_init, INPUT_HOVER))
 
     q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
-    x_des = jnp.concatenate([q_des, jnp.zeros(config.robot[settings.ROBOT_NV_KEY], dtype=jnp.float32)], axis=0)
+    x_des = jnp.concatenate([q_des, jnp.zeros(config.robot.nv, dtype=jnp.float32)], axis=0)
 
     reference = jnp.concatenate((x_des, INPUT_HOVER))
 
