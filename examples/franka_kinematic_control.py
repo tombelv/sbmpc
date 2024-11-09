@@ -1,7 +1,7 @@
 import time, os
 
 import os
-os.environ["XLA_FLAGS"] = "--xla_dump_to=/tmp/foo"
+# os.environ["XLA_FLAGS"] = "--xla_dump_to=/tmp/foo"
 
 import jax
 import jax.numpy as jnp
