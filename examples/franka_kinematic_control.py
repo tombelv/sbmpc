@@ -1,11 +1,14 @@
 import time, os
 
+import os
+# os.environ["XLA_FLAGS"] = "--xla_dump_to=/tmp/foo"
+
 import jax
 import jax.numpy as jnp
 
 from sbmpc import  ModelMjx, SamplingBasedMPC, BaseObjective
-from sbmpc.settings import Config
-from sbmpc.simulation import Simulator, MujocoVisualizer, Visualizer, construct_mj_visualizer_from_model
+from sbmpc.settings import Config, DynamicsModel
+from sbmpc.simulation import Simulator, MujocoVisualizer, Visualizer, construct_mj_visualizer_from_model, build_model_from_config
 from sbmpc.filter import MovingAverage
 from typing import Optional
 
@@ -73,30 +76,45 @@ class Simulation(Simulator):
 
 if __name__ == "__main__":
 
+
+
+
     config = Config()
-    config.general["visualize"] = False
-    config.MPC["dt"] = 0.02
-    config.MPC["horizon"] = 50
-    config.MPC["std_dev_mppi"] = 0.2*jnp.ones(7)
-    config.MPC["num_parallel_computations"] = 1000
+    config.general.visualize = True
+    config.MPC.dt = 0.02
+    config.MPC.nu = 7
+    config.MPC.horizon = 50
+    config.MPC.std_dev_mppi = 0.2*jnp.ones(7)
+    config.MPC.initial_guess = None
+    config.MPC.num_parallel_computations = 1000
+    config.MPC.lambda_mpc = 100.0
+    config.MPC.smoothing = "Spline"
+    config.MPC.num_control_points = 5
+    config.MPC.gains = False
+    config.MPC.sensitivity = False
 
-    config.MPC["lambda"] = 100.0
+    config.robot.robot_scene_path = SCENE_PATH
+    config.robot.mjx_kinematic = True
 
-    config.MPC["smoothing"] = "Spline"
-    config.MPC["num_control_points"] = 5
 
+    # system, x_init, state_init = build_model_from_config(DynamicsModel.MJX, config)
     system = ModelMjx(SCENE_PATH, kinematic=True)
     system.set_qpos(system.mj_model.key_qpos[mujoco.mj_name2id(system.mj_model, mujoco.mjtObj.mjOBJ_KEY.value, "home")])
     q_init = system.data.qpos
     print("Initial configuration = ", q_init)
 
-    solver = SamplingBasedMPC(system, Objective(system), config)
+    x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
+    state_init = system.data
+
+    objective = Objective(system)
+    solver = SamplingBasedMPC(system, objective, config)
 
     # dummy for jitting
-    solver.command(q_init, jnp.zeros(3)).block_until_ready()
+    ref = jnp.zeros(3, dtype=jnp.float32)
+    solver.command(q_init, ref).block_until_ready()
 
     # Setup and run the simulation
-    sim = Simulation(q_init, system, solver, 5000, visualize=config.general["visualize"])
+    sim = Simulation(q_init, system, solver, 5000, visualize=config.general.visualize)
     sim.simulate()
 
 

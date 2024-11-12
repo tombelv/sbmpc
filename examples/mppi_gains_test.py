@@ -50,18 +50,18 @@ class Objective(BaseObjective):
 if __name__ == "__main__":
 
     config = Config()
-    config.MPC["dt"] = 0.05
-    config.MPC["horizon"] = 25
-    config.MPC["std_dev_mppi"] = jnp.array([0.5, 0.5])
+    config.MPC.dt = 0.05
+    config.MPC.horizon = 25
+    config.MPC.std_dev_mppi = jnp.array([0.5, 0.5])
     # config.MPC["initial_guess"] = - K @ jnp.array([0.5, 0.0])
-    config.MPC["num_parallel_computations"] = 10000
+    config.MPC.num_parallel_computations = 10000
 
-    config.MPC["lambda"] = 1.0
+    config.MPC.lambda_mpc = 1.0
 
-    config.MPC["smoothing"] = "Spline"
-    config.MPC["num_control_points"] = 5
+    config.MPC.smoothing = "Spline"
+    config.MPC.num_control_points = 5
 
-    config.MPC["gains"] = True
+    config.MPC.gains = True
 
     system = Model(dynamics, nq=1, nv=1, nu=2, integrator_type="euler")
     objective = Objective()

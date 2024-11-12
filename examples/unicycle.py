@@ -6,8 +6,8 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
 from sbmpc import Model, SamplingBasedMPC, BaseObjective
-from sbmpc.settings import Config
-from sbmpc.simulation import Simulator
+from sbmpc.settings import Config, DynamicsModel
+from sbmpc.simulation import Simulator, build_all
 from sbmpc.filter import MovingAverage
 
 
@@ -34,46 +34,39 @@ class Objective(BaseObjective):
         return 500 * jnp.linalg.norm(error, ord=2)
 
 
-class Simulation(Simulator):
-    def __init__(self, initial_state, model, controller, num_iterations: int):
-        super().__init__(initial_state, model, controller, num_iterations)
-
-    def update(self):
-        x_des = jnp.array([0, 0, jnp.pi], dtype=jnp.float32)
-        # Compute the optimal input sequence
-        time_start = time.time_ns()
-        input_sequence = self.controller.command(self.current_state, x_des, shift_guess=True).block_until_ready()
-        print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
-        ctrl = input_sequence[0, :]
-
-        self.input_traj[self.iter, :] = ctrl
-
-        # Simulate the dynamics
-        self.current_state = self.model.integrate(self.current_state, ctrl, self.controller.dt)
-        self.state_traj[self.iter + 1, :] = self.current_state
-
-
 if __name__ == "__main__":
 
-    system = Model(unicycle_dynamics, nq=3, nv=0, nu=2, input_bounds=[input_min, input_max], integrator_type="rk4")
-
-    x_init = jnp.array([2, 2, 0], dtype=jnp.float32)
-
     config = Config()
-    config.MPC["dt"] = 0.02
-    config.MPC["horizon"] = 100
-    config.MPC["std_dev_mppi"] = jnp.array([0.1, 0.1])
-    config.MPC["num_parallel_computations"] = 2000
+    config.MPC.dt = 0.02
+    config.MPC.horizon = 100
+    config.MPC.nu = 2
+    config.MPC.std_dev_mppi = jnp.array([0.1, 0.1])
+    config.MPC.num_parallel_computations = 2000
 
-    config.MPC["lambda"] = 5.0
+    config.MPC.lambda_mpc = 5.0
 
-    config.MPC["smoothing"] = "Spline"
-    config.MPC["num_control_points"] = 5
+    config.MPC.smoothing = "Spline"
+    config.MPC.num_control_points = 5
 
-    solver = SamplingBasedMPC(system, Objective(), config)
+    config.robot.nq = 3
+    config.robot.nv = 0
+    config.robot.nu = 2
+    config.robot.input_min = input_min
+    config.robot.input_max = input_max
+    config.robot.q_init = jnp.array([2, 2, 0], dtype=jnp.float32)
 
-    # Setup and run the simulation
-    sim = Simulation(x_init, system, solver, 500)
+    config.general.integrator_type = "rk4"
+
+    config.solver_dynamics = DynamicsModel.CUSTOM
+    config.sim_dynamics = DynamicsModel.CUSTOM
+
+    objective = Objective()
+
+    reference = jnp.array([0, 0, jnp.pi], dtype=jnp.float32)
+
+    sim = build_all(config, objective,
+                    reference,
+                    custom_dynamics_fn=unicycle_dynamics)
     sim.simulate()
 
     # Plot x-y position of the robot

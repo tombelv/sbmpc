@@ -1,8 +1,12 @@
+from typing import Optional, Dict
+
 import jax
 import jax.numpy as jnp
 from abc import ABC, abstractmethod
 import mujoco
 from mujoco import mjx
+
+from sbmpc.settings import MODEL_PARAMETRIC_INTEGRATOR_TYPES
 
 
 class BaseModel(ABC):
@@ -37,6 +41,7 @@ class BaseModel(ABC):
         pass
 
 
+
 class ModelParametric(BaseModel):
     def __init__(self, model_dynamics_parametric,
                  nq: int,
@@ -44,24 +49,25 @@ class ModelParametric(BaseModel):
                  nu: int,
                  np=0,
                  input_bounds=(-jnp.inf, jnp.inf),
-                 integrator_type="si_euler"):
+                 integrator_type="si_euler",
+                 integrator_params: Optional[Dict] = None):
 
         super().__init__(nq, nv, nu, np, input_bounds)
 
         self.dynamics_parametric = model_dynamics_parametric
 
-        if integrator_type == "si_euler":
+        if integrator_type == MODEL_PARAMETRIC_INTEGRATOR_TYPES[0]:
             self.integrate_parametric = self.integrate_si_euler
-        elif integrator_type == "euler":
+        elif integrator_type == MODEL_PARAMETRIC_INTEGRATOR_TYPES[1]:
             self.integrate_parametric = self.integrate_euler
-        elif integrator_type == "rk4":
+        elif integrator_type == MODEL_PARAMETRIC_INTEGRATOR_TYPES[2]:
             self.integrate_parametric = self.integrate_rk4
-        elif integrator_type == "custom_discrete":
+        elif integrator_type == MODEL_PARAMETRIC_INTEGRATOR_TYPES[3]:
             self.integrate_parametric = model_dynamics_parametric
         else:
             raise ValueError("""
             Integrator type not supported.
-            Available types: si_euler, euler, rk4, custom_discrete
+            Available types: si_euler, euler, rk4, custom_discrete, mjx
             """)
 
         self.partial_sens_all = jax.jacfwd(self.integrate_parametric, argnums=(0, 1, 2))

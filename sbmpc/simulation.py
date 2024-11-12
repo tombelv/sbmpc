@@ -7,8 +7,10 @@ import mujoco.viewer
 import time
 import logging
 import traceback
-from sbmpc.model import BaseModel, ModelMjx
-from typing import Callable, Tuple, Optional
+from sbmpc.model import BaseModel, Model, ModelMjx
+import sbmpc.settings as settings
+from sbmpc.solvers import BaseObjective, SamplingBasedMPC
+from typing import Callable, Tuple, Optional, Dict
 
 
 class Visualizer(ABC):
@@ -79,8 +81,7 @@ class MujocoVisualizer(Visualizer):
         expected_lookat_size = 3
         actual_size = len(lookat_point)
         if actual_size != expected_lookat_size:
-            raise ValueError(f"Invalid look at point. Size should be {
-                             expected_lookat_size}, {actual_size} given.")
+            raise ValueError(f"Invalid look at point. Size should be {expected_lookat_size}, {actual_size} given.")
         self.viewer.cam.lookat = lookat_point
 
     def set_cam_distance(self, distance: float) -> None:
@@ -173,3 +174,105 @@ class Simulator(ABC):
     def step(self):
         self.update()
         self.iter += 1
+
+ROBOT_SCENE_PATH_KEY = "robot_scene_path"
+
+class Simulation(Simulator):
+    def __init__(self, initial_state, model, controller, const_reference: jnp.array, num_iterations: int, visualize: bool = True, visualize_params: Optional[Dict] = None):
+        self.const_reference = const_reference
+        visualizer = None
+        if visualize:
+            scene_path = visualize_params.get(ROBOT_SCENE_PATH_KEY, None)
+            if visualize_params is None or scene_path is None:
+                raise ValueError("if visualizing need to input scene path for mjx")
+            visualizer = construct_mj_visualizer_from_model(model, scene_path)
+
+        super().__init__(initial_state, model, controller, num_iterations, visualizer)
+
+    def update(self):
+        # Compute the optimal input sequence
+        time_start = time.time_ns()
+        input_sequence = self.controller.command(self.current_state_vec(), self.const_reference, num_steps=1).block_until_ready()
+        print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
+        ctrl = input_sequence[0, :].block_until_ready()
+
+        self.input_traj[self.iter, :] = ctrl
+
+        # Simulate the dynamics
+        self.current_state = self.model.integrate(self.current_state, ctrl, self.controller.dt)
+        self.state_traj[self.iter + 1, :] = self.current_state_vec()
+
+
+def build_custom_model(custom_dynamics_fn: Callable, nq: int, nv: int, nu: int, input_min: jnp.array, input_max: jnp.array,
+                        q_init: jnp.array, integrator_type: str ="si_euler") -> Tuple[BaseModel, jnp.array, jnp.array]:
+    system = Model(custom_dynamics_fn, nq=nq, nv=nv, nu=nu, input_bounds=[input_min, input_max], integrator_type=integrator_type)
+    x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
+    state_init = x_init
+    return system, x_init, state_init
+
+
+def build_mjx_model(scene_path: str, kinematic: bool = False) -> Tuple[BaseModel, jnp.array, jnp.array]:
+    system = ModelMjx(scene_path, kinematic=kinematic)
+    q_init = system.data.qpos
+    x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
+    state_init = system.data
+    return system, x_init, state_init
+
+def build_model_from_config(model_type: settings.DynamicsModel, config: settings.Config, custom_dynamics_fn: Optional[Callable] = None):
+    if model_type == settings.DynamicsModel.CUSTOM:
+        if custom_dynamics_fn is None:
+            raise ValueError("for classic dynamics model, a custom dynamics function must be passed. See examples.")
+        nq = config.robot.nq
+        nv = config.robot.nv
+        nu = config.robot.nu
+        input_min = config.robot.input_min
+        input_max = config.robot.input_max
+        q_init = config.robot.q_init
+        integrator_type = config.general.integrator_type
+        return build_custom_model(custom_dynamics_fn, nq, nv, nu, input_min, input_max, q_init, integrator_type)
+    elif model_type == settings.DynamicsModel.MJX:
+        return build_mjx_model(config.robot.robot_scene_path, config.robot.mjx_kinematic)
+    else:
+        raise NotImplementedError
+
+def build_model_and_solver(config: settings.Config, objective: BaseObjective, custom_dynamics_fn: Optional[Callable] = None):
+    if config.solver_type != settings.Solver.MPPI:
+        raise NotImplementedError
+    solver_dynamics_model_setting = config.solver_dynamics
+    system, solver_x_init, sim_state_init = build_model_from_config(solver_dynamics_model_setting, config, custom_dynamics_fn)
+    solver = SamplingBasedMPC(system, objective, config)
+    return system, solver
+
+def build_all(config: settings.Config, objective: BaseObjective,
+              reference: jnp.array,
+              custom_dynamics_fn: Optional[Callable] = None):
+    system, x_init, state_init = (None, None, None)
+    solver_dynamics_model_setting = config.solver_dynamics
+    sim_dynamics_model_setting = config.sim_dynamics
+
+    solver_dynamics_model, sim_dynamics_model = (None, None)
+    solver_x_init, sim_state_init = (None, None)
+    if solver_dynamics_model_setting == sim_dynamics_model_setting:
+        system, solver_x_init, sim_state_init = build_model_from_config(solver_dynamics_model_setting, config, custom_dynamics_fn)
+        solver_dynamics_model = system
+        sim_dynamics_model = system
+    else:
+        system, solver_x_init, _ = build_model_from_config(solver_dynamics_model_setting, config, custom_dynamics_fn)
+        solver_dynamics_model = system
+        sim_dynamics_model, _, sim_state_init = build_model_from_config(sim_dynamics_model_setting, config, custom_dynamics_fn)
+
+    if config.solver_type != settings.Solver.MPPI:
+        raise NotImplementedError
+
+    solver = SamplingBasedMPC(solver_dynamics_model, objective, config)
+    
+    # dummy for jitting
+    input_sequence = solver.command(solver_x_init, reference, False).block_until_ready()
+    visualize = config.general.visualize
+    visualizer_params = {ROBOT_SCENE_PATH_KEY: config.robot.robot_scene_path}
+
+    # Setup and run the simulation
+    num_iterations = config.sim_iterations
+    sim = Simulation(sim_state_init, sim_dynamics_model, solver, reference, num_iterations, visualize, visualizer_params)
+    return sim
+

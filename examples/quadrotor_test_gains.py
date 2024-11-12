@@ -130,18 +130,17 @@ class Simulation(Simulator):
 if __name__ == "__main__":
 
     config = Config()
-    config.general["visualize"] = False
-    config.MPC["dt"] = 0.02
-    config.MPC["horizon"] = 25
-    config.MPC["std_dev_mppi"] = 0.2*jnp.array([0.2, 0.3, 0.3, 0.15])
-    config.MPC["num_parallel_computations"] = 5000
-    config.MPC["initial_guess"] = input_hover
-    config
+    config.visualize = False
+    config.MPC.nu = 4
+    config.MPC.dt = 0.02
+    config.MPC.horizon = 25
+    config.MPC.std_dev_mppi = 0.2*jnp.array([0.2, 0.3, 0.3, 0.15])
+    config.MPC.num_parallel_computations = 5000
+    config.MPC.initial_guess = input_hover
+    config.MPC.smoothing = "Spline"
+    config.MPC.num_control_points = 5
 
-    config.MPC["smoothing"] = "Spline"
-    config.MPC["num_control_points"] = 5
-
-    config.MPC["gains"] = True
+    config.MPC.gains = True
 
     system = Model(quadrotor_dynamics, nq=7, nv=6, nu=4, input_bounds=[input_min, input_max])
     q_init = jnp.array([0., 0., 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
@@ -155,7 +154,7 @@ if __name__ == "__main__":
     input_sequence = solver.command(x_init, reference, shift_guess=False).block_until_ready()
 
     # Setup and run the simulation
-    sim = Simulation(state_init, system, solver, 500, config.general["visualize"])
+    sim = Simulation(state_init, system, solver, 500, config.general.visualize)
     sim.gain_matrix = solver.gains
     sim.input_ff = input_sequence[:system.nu]
     sim.simulate()
