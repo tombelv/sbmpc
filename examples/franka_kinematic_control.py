@@ -4,7 +4,7 @@ import os
 import jax
 import jax.numpy as jnp
 
-from sbmpc import  ModelMjx, SamplingBasedMPC, BaseObjective
+from sbmpc import ModelMjx, SamplingBasedMPC, BaseObjective
 from sbmpc.settings import Config, RobotConfig
 from sbmpc.simulation import Simulator, construct_mj_visualizer_from_model
 
@@ -83,8 +83,7 @@ if __name__ == "__main__":
     config.general.visualize = True
     config.MPC.dt = 0.02
     config.MPC.horizon = 50
-    config.MPC.std_dev_mppi = 0.2*jnp.ones(7)
-    config.MPC.initial_guess = None
+    config.MPC.std_dev_mppi = 0.2*jnp.ones(robot_config.nu)
     config.MPC.num_parallel_computations = 1000
     config.MPC.lambda_mpc = 100.0
     config.MPC.smoothing = "Spline"
