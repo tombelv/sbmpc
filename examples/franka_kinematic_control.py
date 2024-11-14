@@ -1,16 +1,13 @@
-import time, os
-
+import time
 import os
-# os.environ["XLA_FLAGS"] = "--xla_dump_to=/tmp/foo"
 
 import jax
 import jax.numpy as jnp
 
 from sbmpc import  ModelMjx, SamplingBasedMPC, BaseObjective
-from sbmpc.settings import Config, DynamicsModel
-from sbmpc.simulation import Simulator, MujocoVisualizer, Visualizer, construct_mj_visualizer_from_model, build_model_from_config
-from sbmpc.filter import MovingAverage
-from typing import Optional
+from sbmpc.settings import Config, RobotConfig
+from sbmpc.simulation import Simulator, construct_mj_visualizer_from_model
+
 
 import mujoco.mjx as mjx
 import mujoco
@@ -76,13 +73,15 @@ class Simulation(Simulator):
 
 if __name__ == "__main__":
 
+    robot_config = RobotConfig()
 
+    robot_config.robot_scene_path = SCENE_PATH
+    robot_config.mjx_kinematic = True
+    robot_config.nu = 7
 
-
-    config = Config()
+    config = Config(robot_config)
     config.general.visualize = True
     config.MPC.dt = 0.02
-    config.MPC.nu = 7
     config.MPC.horizon = 50
     config.MPC.std_dev_mppi = 0.2*jnp.ones(7)
     config.MPC.initial_guess = None
@@ -92,10 +91,6 @@ if __name__ == "__main__":
     config.MPC.num_control_points = 5
     config.MPC.gains = False
     config.MPC.sensitivity = False
-
-    config.robot.robot_scene_path = SCENE_PATH
-    config.robot.mjx_kinematic = True
-
 
     # system, x_init, state_init = build_model_from_config(DynamicsModel.MJX, config)
     system = ModelMjx(SCENE_PATH, kinematic=True)

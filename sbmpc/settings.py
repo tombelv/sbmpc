@@ -5,52 +5,30 @@ import jax
 import jax.numpy as jnp
 from jax import Array, Device
 
-# Deprecated, not used now
-class ConfigGeneral:
-    def __init__(self, dtype_general, device: jax.Device):
-        self.dtype_general = dtype_general
-        self.device = device
-
-# Deprecated, not used now
-class ConfigMPC:
-    def __init__(self, dt: float, horizon: int, std_dev_mppi: jnp.array, num_parallel_computations: int = 10000,
-                 initial_guess=None):
-        self.dt = dt
-        self.horizon = horizon
-        self.num_parallel_computations = num_parallel_computations
-
-        if initial_guess is None:
-            self.initial_guess = 0.0 * std_dev_mppi
-        else:
-            self.initial_guess = initial_guess
-
-        self.std_dev_mppi = std_dev_mppi
-
-        self.filter = None
-
 MODEL_PARAMETRIC_INTEGRATOR_TYPES = ["si_euler", "euler", "rk4", "custom_discrete"]
+
 
 class DynamicsModel(Enum):
     CUSTOM = 0
     MJX = 1
 
+
 class Solver(Enum):
     MPPI = 0
+
 
 class RobotConfig:
     def __init__(self):
         self._robot_scene_path = ""
         self._mjx_kinematic = False
-        self._nq = 7
-        self._nv = 6
-        self._nu = 4
-        
+        self._nq = None
+        self._nv = None
+        self._nu = None
+
         self._input_min = None
         self._input_max = None
-        self.__init_input_limits_from_nu()
-
-        q_init = jnp.zeros((self.nq))
-        self._q_init = q_init
+        # self.__init_input_limits_from_nu()
+        self._q_init = None
 
     def __init_input_limits_from_nu(self):
         input_min = jnp.zeros((self._nu))
@@ -72,6 +50,7 @@ class RobotConfig:
         if not os.path.exists(value):
             raise FileNotFoundError
         self._robot_scene_path = value
+
 
     @property
     def mjx_kinematic(self):
@@ -132,16 +111,20 @@ class MPCConfig:
         self._horizon = 25
         self._num_parallel_computations = 1000
         self._lambda_mpc = 1.0
-        self._nu = 4
+        self._nu = None
         self._std_dev_mppi = None
         self._initial_guess = None
-        self.__init_std_dev_and_initial_guess_from_nu()
         self._filter = None
         self._gains = False
         self._sensitivity = False
         self._smoothing = "Spline"
         self._augmented_reference = None
         self._num_control_points = 5
+
+    def set_from_model_config(self, config: RobotConfig):
+        self.nu = config.nu
+        self._std_dev_mppi = jnp.zeros(self.nu)
+        self._initial_guess = jnp.zeros(self.nu)
 
     @property
     def dt(self):
@@ -184,20 +167,6 @@ class MPCConfig:
         if not isinstance(value, float):
             raise ValueError("float type is expected")
         self._lambda_mpc = value
-    
-    @property
-    def lambda_mpc(self):
-        return self._lambda_mpc
-
-    @lambda_mpc.setter
-    def lambda_mpc(self, value: float):
-        if not isinstance(value, float):
-            raise ValueError("float type is expected")
-        self._lambda_mpc = value
-
-    def __init_std_dev_and_initial_guess_from_nu(self):
-        self._std_dev_mppi = 0.2 * jnp.array([0.1] * self.nu)
-        self._initial_guess = 0.2 * jnp.zeros((self.nu))
 
     @property
     def nu(self):
@@ -208,7 +177,6 @@ class MPCConfig:
         if not isinstance(value, int):
             raise ValueError("int type is expected")
         self._nu = value
-        self.__init_std_dev_and_initial_guess_from_nu()
 
     @property
     def std_dev_mppi(self):
@@ -345,10 +313,10 @@ class GeneralConfig:
         self._integrator_type = value
 
 class Config:
-    def __init__(self):
+    def __init__(self, robot_config: RobotConfig):
         self.general = GeneralConfig()
 
-        self.robot = RobotConfig()
+        self.robot = robot_config
 
         self.solver_dynamics = DynamicsModel.CUSTOM
         self.solver_type = Solver.MPPI
@@ -357,3 +325,5 @@ class Config:
         self.sim_iterations = 500
 
         self.MPC = MPCConfig()
+        self.MPC.set_from_model_config(robot_config)
+

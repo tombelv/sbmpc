@@ -5,10 +5,9 @@ import jax.numpy as jnp
 
 import matplotlib.pyplot as plt
 
-from sbmpc import Model, SamplingBasedMPC, BaseObjective
-from sbmpc.settings import Config, DynamicsModel
-from sbmpc.simulation import Simulator, build_all
-from sbmpc.filter import MovingAverage
+from sbmpc import BaseObjective
+from sbmpc.settings import Config, DynamicsModel, RobotConfig
+from sbmpc.simulation import build_all
 
 
 input_max = jnp.array([1, 1])
@@ -36,10 +35,19 @@ class Objective(BaseObjective):
 
 if __name__ == "__main__":
 
-    config = Config()
+    robot_config = RobotConfig()
+    robot_config.nq = 3
+    robot_config.nv = 0
+    robot_config.nu = 2
+    robot_config.input_min = input_min
+    robot_config.input_max = input_max
+    robot_config.q_init = jnp.array([2, 2, 0], dtype=jnp.float32)
+
+    config = Config(robot_config)
+
     config.MPC.dt = 0.02
     config.MPC.horizon = 100
-    config.MPC.nu = 2
+
     config.MPC.std_dev_mppi = jnp.array([0.1, 0.1])
     config.MPC.num_parallel_computations = 2000
 
@@ -47,13 +55,6 @@ if __name__ == "__main__":
 
     config.MPC.smoothing = "Spline"
     config.MPC.num_control_points = 5
-
-    config.robot.nq = 3
-    config.robot.nv = 0
-    config.robot.nu = 2
-    config.robot.input_min = input_min
-    config.robot.input_max = input_max
-    config.robot.q_init = jnp.array([2, 2, 0], dtype=jnp.float32)
 
     config.general.integrator_type = "rk4"
 

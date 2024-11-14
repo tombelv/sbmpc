@@ -10,13 +10,11 @@ import sbmpc.settings as settings
 
 from sbmpc.simulation import build_all
 from sbmpc.geometry import skew, quat_product, quat2rotm, quat_inverse
-from sbmpc.filter import MovingAverage
 
 os.environ['XLA_FLAGS'] = '--xla_gpu_triton_gemm_any=True'
 # Needed to remove warnings, to be investigated
 jax.config.update("jax_default_matmul_precision", "high")
 
-MODEL = "classic"
 SCENE_PATH = "bitcraze_crazyflie_2/scene.xml"
 
 INPUT_MAX = jnp.array([1, 2.5, 2.5, 2])
@@ -105,10 +103,20 @@ class Objective(BaseObjective):
 
 if __name__ == "__main__":
 
-    config = settings.Config()
+    robot_config = settings.RobotConfig()
+
+    robot_config.robot_scene_path = SCENE_PATH
+    robot_config.nq = 7
+    robot_config.nv = 6
+    robot_config.nu = 4
+    robot_config.input_min = INPUT_MIN
+    robot_config.input_max = INPUT_MAX
+    robot_config.q_init = jnp.array([0., 0., 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
+    
+    config = settings.Config(robot_config)
+
     config.general.visualize = True
     config.MPC.dt = 0.02
-    config.MPC.nu = 4
     config.MPC.horizon = 25
     config.MPC.std_dev_mppi = 0.2*jnp.array([0.1, 0.1, 0.1, 0.05])
     config.MPC.num_parallel_computations = 2000
@@ -118,23 +126,15 @@ if __name__ == "__main__":
     config.MPC.num_control_points = 5
     config.MPC.gains = False
 
-    config.robot.robot_scene_path = SCENE_PATH
-    config.robot.nq = 7
-    config.robot.nv = 6
-    config.robot.nu = 4
-    config.robot.input_min = INPUT_MIN
-    config.robot.input_max = INPUT_MAX
-    config.robot.q_init = jnp.array([0., 0., 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
-
     config.solver_dynamics = settings.DynamicsModel.CUSTOM
     config.sim_dynamics = settings.DynamicsModel.MJX
 
-    # x_init = jnp.concatenate([config.robot[settings.ROBOT_Q_INIT_KEY],
-    #                  jnp.zeros(config.robot[settings.ROBOT_NV_KEY], dtype=jnp.float32)], axis=0)
+    # x_init = jnp.concatenate([robot_config[settings.ROBOT_Q_INIT_KEY],
+    #                  jnp.zeros(robot_config[settings.ROBOT_NV_KEY], dtype=jnp.float32)], axis=0)
     # reference = jnp.concatenate((x_init, INPUT_HOVER))
 
     q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
-    x_des = jnp.concatenate([q_des, jnp.zeros(config.robot.nv, dtype=jnp.float32)], axis=0)
+    x_des = jnp.concatenate([q_des, jnp.zeros(robot_config.nv, dtype=jnp.float32)], axis=0)
 
     reference = jnp.concatenate((x_des, INPUT_HOVER))
 
