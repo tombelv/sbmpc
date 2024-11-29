@@ -1,0 +1,23 @@
+<?xml version="1.0" ?>
+
+<robot name="cf2">
+
+  <link name="base_link"> 
+
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <mass value="0.027"/>
+      <inertia ixx="2.3951e-5" ixy="0.0" ixz="0.0" iyy="2.3951e-5" iyz="0.0" izz="3.2347e-5"/>
+    </inertial>
+
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <cylinder radius=".06" length=".025"/>
+      </geometry>
+    </collision>  
+
+  </link>
+
+</robot>
+
