@@ -4,7 +4,7 @@ from numpy.random import random as rand
 
 
 basic_sphere = """
-<geom size="0.1" type="sphere" rgba = "0 0 1 1"/>
+<geom size="0.05" type="sphere" rgba = "0 0 1 1"/>
   """
 original_obstacles = None
 original_scene = None
