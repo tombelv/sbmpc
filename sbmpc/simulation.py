@@ -53,7 +53,7 @@ class Visualizer(ABC):
 
 
 class MujocoVisualizer(Visualizer):
-    def __init__(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData, step_mujoco: bool = True, show_left_ui: bool = False, show_right_ui: bool = False):
+    def __init__(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData, obs_model : mujoco.MjModel, obs_data : mujoco.MjData, step_mujoco: bool = True, show_left_ui: bool = False, show_right_ui: bool = False):
         self.mj_data = mj_data
         self.mj_model = mj_model
         self.step_mujoco = step_mujoco
@@ -62,6 +62,8 @@ class MujocoVisualizer(Visualizer):
                                                    show_left_ui=show_left_ui,
                                                    show_right_ui=show_right_ui,
                                                    key_callback=self.key_callback)
+        self.obs_model = obs_model
+        self.obs_data = obs_data
 
     def key_callback(self, keycode):
         if chr(keycode) == ' ':
@@ -93,11 +95,17 @@ class MujocoVisualizer(Visualizer):
     def set_qpos(self, qpos) -> None:
         if self.step_mujoco:
             self.mj_data.qpos = qpos
+            self.obs_data.qpos = qpos # first just trying to move obstacles with drone
             mujoco.mj_fwdPosition(self.mj_model, self.mj_data)
+            mujoco.mj_fwdPosition(self.obs_model, self.obs_data)
         self.viewer.sync()
 
-def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str):
+def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str, obstacle_model):
     mj_model, mj_data = (None, None)
+    # obs_model, obs_data = (None, None)
+    obs_model = obstacle_model.mj_model
+    obs_data = obstacle_model.mj_data
+
     step_mujoco = True
     if isinstance(model, ModelMjx):
         mj_model = model.mj_model
@@ -106,7 +114,16 @@ def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str):
         new_system = ModelMjx(scene_path)
         mj_model = new_system.mj_model
         mj_data = new_system.mj_data
-    visualizer = MujocoVisualizer(mj_model, mj_data, step_mujoco=step_mujoco)
+
+    # if isinstance(obs_model, ModelMjx):
+    #     obs_model = obstacle_model.mj_model
+    #     obs_data = obstacle_model.mj_data
+    # else:
+    #     new_system = ModelMjx(scene_path)
+    #     obs_model = new_system.obs_model
+    #     obs_data = new_system.obs_data
+
+    visualizer = MujocoVisualizer(mj_model, mj_data, obs_model, obs_data, step_mujoco=step_mujoco)
     return visualizer
 
 
@@ -185,7 +202,7 @@ class Simulation(Simulator):
             scene_path = visualize_params.get(ROBOT_SCENE_PATH_KEY, None)
             if visualize_params is None or scene_path is None:
                 raise ValueError("if visualizing need to input scene path for mjx")
-            visualizer = construct_mj_visualizer_from_model(model, scene_path)
+            visualizer = as(model, scene_path)
 
         super().__init__(initial_state, model, controller, num_iterations, visualizer)
 
