@@ -32,7 +32,6 @@ spatial_inertia_mat_inv = jnp.linalg.inv(spatial_inertia_mat)
 input_hover = jnp.array([mass*gravity, 0., 0., 0.], dtype=jnp.float32)
 
 SCENE_PATH = "bitcraze_crazyflie_2/scene.xml"
-obs_model = ModelMjx(model_path="examples/bitcraze_crazyflie_2/obstacles.xml")
 
 @jax.jit
 def quadrotor_dynamics(state: jnp.array, inputs: jnp.array, params) -> jnp.array:
@@ -104,10 +103,10 @@ class Objective(BaseObjective):
 
 
 class Simulation(Simulator):
-    def __init__(self, initial_state, model, controller, num_iterations: int, visualize: bool = False):
+    def __init__(self, initial_state, model, controller, num_iterations: int, visualize: bool = False, move_obstacles: bool = True):
         visualizer = None
         if visualize:
-            visualizer = construct_mj_visualizer_from_model(model, SCENE_PATH, obs_model)
+            visualizer = construct_mj_visualizer_from_model(model, SCENE_PATH, move_obstacles=True)
         super().__init__(initial_state, model, controller, num_iterations, visualizer)
 
         self.gain_matrix = jnp.zeros((4, 13))
@@ -156,7 +155,7 @@ if __name__ == "__main__":
     input_sequence = solver.command(x_init, reference, shift_guess=False).block_until_ready()
 
     # Setup and run the simulation
-    sim = Simulation(state_init, system, solver, 500, config.general.visualize)
+    sim = Simulation(state_init, system, solver, 500, config.general.visualize, move_obstacles=False)
     sim.gain_matrix = solver.gains
     sim.input_ff = input_sequence[:system.nu]
     sim.simulate()
