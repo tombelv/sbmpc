@@ -10,12 +10,13 @@ import sbmpc.settings as settings
 
 from sbmpc.simulation import build_all
 from sbmpc.geometry import skew, quat_product, quat2rotm, quat_inverse
+from sbmpc.obstacle_loader import ObstacleLoader
 
 os.environ['XLA_FLAGS'] = '--xla_gpu_triton_gemm_any=True'
 # Needed to remove warnings, to be investigated
 jax.config.update("jax_default_matmul_precision", "high")
 
-SCENE_PATH = "bitcraze_crazyflie_2/scene.xml"
+SCENE_PATH = "examples/bitcraze_crazyflie_2/scene.xml"
 
 INPUT_MAX = jnp.array([1, 2.5, 2.5, 2])
 INPUT_MIN = jnp.array([0, -2.5, -2.5, -2])
@@ -102,6 +103,9 @@ class Objective(BaseObjective):
 
 
 if __name__ == "__main__":
+    obsl = ObstacleLoader()
+    obsl.create_obstacles()
+    obsl.load_obstacles()
 
     robot_config = settings.RobotConfig()
 
@@ -143,8 +147,11 @@ if __name__ == "__main__":
     sim = build_all(config, objective,
                     reference,
                     custom_dynamics_fn=quadrotor_dynamics)
-
+    
+    sim.visualizer.move_obstacles = False # can toggle - currently stationary for constraint modelling
     sim.simulate()
+
+    obsl.reset_xmls()
 
     time_vect = config.MPC.dt*jnp.arange(sim.state_traj.shape[0])
     ax = plt.figure().add_subplot(projection='3d')

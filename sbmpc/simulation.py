@@ -98,16 +98,15 @@ class MujocoVisualizer(Visualizer):
             self.mj_data.qpos = qpos
             
             if self.move_obstacles:  
-            	step = 0.1
-            	r = 0.4
-            	# origin = (0,0)
-            	origin = (self.mj_model.body_pos[0][0], self.mj_model.body_pos[0][0]) # obstacles follow drone
-            	x = r*np.cos(self.ang) 
-            	y = r*np.sin(self.ang)
-            	z = self.mj_model.body_pos[1][2]
-            	self.mj_model.body_pos[1] = [origin[0] + x, origin[1] + y, z]  # maintain height 
-            	self.ang = self.ang + step  
-            	# TODO - move obstacles separately by modelling as individual bodies
+                step = 0.1
+                r = 0.4
+            	# origin = (0,0) 
+                origin = (self.mj_data.xpos[2][0], self.mj_data.xpos[2][1]) # obstacles follow drone
+                x = r*np.cos(self.ang) 
+                y = r*np.sin(self.ang)
+                z = self.mj_model.body_pos[1][2]
+                self.mj_model.body_pos[1] = [origin[0] + x, origin[1] + y, z]  # maintain height 
+                self.ang = self.ang + step  # TODO - move obstacles separately by modelling as individual bodies
             	
             	# self.mj_model.body_pos[1] = [self.mj_model.body_pos[1][0] + step, self.mj_model.body_pos[1]s[1] + step, self.mj_model.body_pos[1][2] + step] # move obstacles diagonally
        
@@ -128,7 +127,7 @@ def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str, move_o
         mj_data = new_system.mj_data
 
 
-    visualizer = MujocoVisualizer(mj_model, mj_data, step_mujoco=step_mujoco, move_obstacles=False) # keep obstacles stationary for constraint modelling
+    visualizer = MujocoVisualizer(mj_model, mj_data, step_mujoco=step_mujoco, move_obstacles=move_obstacles) # keep obstacles stationary for constraint modelling
     return visualizer
 
 

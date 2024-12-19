@@ -103,10 +103,10 @@ class Objective(BaseObjective):
 
 
 class Simulation(Simulator):
-    def __init__(self, initial_state, model, controller, num_iterations: int, visualize: bool = False, move_obstacles: bool = True):
+    def __init__(self, initial_state, model, controller, num_iterations: int, visualize: bool = False, move_obstacles:bool = True):
         visualizer = None
         if visualize:
-            visualizer = construct_mj_visualizer_from_model(model, SCENE_PATH, move_obstacles=True)
+            visualizer = construct_mj_visualizer_from_model(model, SCENE_PATH, move_obstacles=move_obstacles)
         super().__init__(initial_state, model, controller, num_iterations, visualizer)
 
         self.gain_matrix = jnp.zeros((4, 13))
@@ -155,7 +155,7 @@ if __name__ == "__main__":
     input_sequence = solver.command(x_init, reference, shift_guess=False).block_until_ready()
 
     # Setup and run the simulation
-    sim = Simulation(state_init, system, solver, 500, config.general.visualize, move_obstacles=False)
+    sim = Simulation(state_init, system, solver, 500, config.general.visualize)
     sim.gain_matrix = solver.gains
     sim.input_ff = input_sequence[:system.nu]
     sim.simulate()
