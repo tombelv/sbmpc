@@ -1,6 +1,7 @@
 import xml.etree.ElementTree as ET
 from copy import deepcopy
 import random
+import numpy as np
 
 basic_sphere =  """<geom size="0.05" type="sphere" rgba = "0 0 1 1"/>"""
 inertial = """<inertial pos="0 0 0"  mass="1.0" fullinertia="0.0031887 0.0032245 0.0013857 -0.0000038 -0.0000881 0.0000846"/>"""
@@ -18,13 +19,16 @@ class ObstacleLoader():
         scene_elem = ET.parse(self.scene_path)
         self.original_scene = deepcopy(scene_elem)
 
+        self.obs_pos = []
+        self.radius = 0.05 # set on line 6 
+
     def create_obstacles(self,obstacle_type=basic_sphere):
         tree = ET.parse(self.obstacle_path)
         root = tree.getroot()
         worldbody = root.find('worldbody')
         body = worldbody.find('body')
 
-        x_range = 0.5  # can scale x,y and z to cover a wider area
+        x_range = 0.5  # can scale x, y and z to cover a wider area
         y_range = 0.5
         z_range = 0.5
         n_obstacles = 3
@@ -35,6 +39,8 @@ class ObstacleLoader():
             y = round(random.uniform(-1*y_range,1*y_range),3)
             z = round(random.uniform(0,1*z_range),3)  # don't spawn below floor level
             random_positions.append(f"{x} {y} {z}")
+            self.obs_pos.append([x, y, z])
+        self.obs_pos = np.concatenate(self.obs_pos, axis=0) # TODO - fix disparity between bodypos and geom pos
         print(f"Created obstacles at {random_positions}")
 
         inertial_props = ET.fromstring(inertial) # add some physical properties for collisions TODO - get collisions working

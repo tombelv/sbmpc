@@ -10,6 +10,7 @@ import traceback
 from sbmpc.model import BaseModel, Model, ModelMjx
 import sbmpc.settings as settings
 from sbmpc.solvers import BaseObjective, SamplingBasedMPC
+from sbmpc.obstacle_loader import ObstacleLoader
 from typing import Callable, Tuple, Optional, Dict
 
 
@@ -132,18 +133,22 @@ def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str, move_o
 
 
 class Simulator(ABC):
-    def __init__(self, initial_state, model: BaseModel, controller, num_iter=100, visualizer: Optional[Visualizer] = None):
+    def __init__(self, initial_state, model: BaseModel, controller, num_iter=100, visualizer: Optional[Visualizer] = None, obstacle_loader = None):
         self.iter = 0
         self.current_state = initial_state
         self.model = model
         self.controller = controller
         self.num_iter = num_iter
+        self.obstacle_loader = obstacle_loader
+
+        constraint_pos = self.model.mj_model.body_pos[1]
+        object.__setattr__(self.current_state,"userdata",constraint_pos)
 
         if isinstance(initial_state, (np.ndarray, jnp.ndarray)):
             self.current_state_vec = lambda: self.current_state
         elif isinstance(initial_state, mjx.Data):
             self.current_state_vec = lambda: np.concatenate(
-                [self.current_state.qpos, self.current_state.qvel])
+                [self.current_state.qpos, self.current_state.qvel, self.current_state.userdata])
         else:
             raise ValueError("""
                         Invalid initial state.
@@ -152,7 +157,7 @@ class Simulator(ABC):
         self.state_traj = np.zeros(
             (self.num_iter + 1, self.current_state_vec().size))
 
-        self.state_traj[0, :] = self.current_state_vec()
+        self.state_traj[0, :] = self.current_state_vec() #[:self.model.nx]
         self.input_traj = np.zeros((self.num_iter, model.nu))
 
         self.visualizer = visualizer
@@ -221,13 +226,19 @@ class Simulation(Simulator):
 
         # Simulate the dynamics
         self.current_state = self.model.integrate(self.current_state, ctrl, self.controller.dt)
-        self.state_traj[self.iter + 1, :] = self.current_state_vec()
+
+        constraint_pos = self.model.mj_model.body_pos[1]
+        object.__setattr__(self.current_state,"userdata",constraint_pos)
+        # print(f"Current constraint pos = {self.current_state.userdata}\n") # TODO - adapt for multiple obstacle bodies
+
+        self.state_traj[self.iter + 1, :] = self.current_state_vec() #[:self.model.nx] # set only qpos and qvel
 
 
 def build_custom_model(custom_dynamics_fn: Callable, nq: int, nv: int, nu: int, input_min: jnp.array, input_max: jnp.array,
-                        q_init: jnp.array, integrator_type: str ="si_euler") -> Tuple[BaseModel, jnp.array, jnp.array]:
+                        q_init: jnp.array, integrator_type: str ="si_euler", obstacle_loader: ObstacleLoader = None) -> Tuple[BaseModel, jnp.array, jnp.array]:
     system = Model(custom_dynamics_fn, nq=nq, nv=nv, nu=nu, input_bounds=[input_min, input_max], integrator_type=integrator_type)
-    x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
+    obs_init = obstacle_loader.obs_pos # if not mjx model must pass obstacle positions from loader
+    x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32), obs_init], axis=0)
     state_init = x_init
     return system, x_init, state_init
 
@@ -235,11 +246,12 @@ def build_custom_model(custom_dynamics_fn: Callable, nq: int, nv: int, nu: int, 
 def build_mjx_model(scene_path: str, kinematic: bool = False) -> Tuple[BaseModel, jnp.array, jnp.array]:
     system = ModelMjx(scene_path, kinematic=kinematic)
     q_init = system.data.qpos
-    x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
+    obs_init = system.mj_model.body_pos[1] # if mjx model can ger obstacle positions from mj_model 
+    x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32), obs_init], axis=0) # include obstacles in initial state
     state_init = system.data
     return system, x_init, state_init
 
-def build_model_from_config(model_type: settings.DynamicsModel, config: settings.Config, custom_dynamics_fn: Optional[Callable] = None):
+def build_model_from_config(model_type: settings.DynamicsModel, config: settings.Config, custom_dynamics_fn: Optional[Callable] = None, obstacle_loader: ObstacleLoader = None):
     if model_type == settings.DynamicsModel.CUSTOM:
         if custom_dynamics_fn is None:
             raise ValueError("for classic dynamics model, a custom dynamics function must be passed. See examples.")
@@ -250,7 +262,7 @@ def build_model_from_config(model_type: settings.DynamicsModel, config: settings
         input_max = config.robot.input_max
         q_init = config.robot.q_init
         integrator_type = config.general.integrator_type
-        return build_custom_model(custom_dynamics_fn, nq, nv, nu, input_min, input_max, q_init, integrator_type)
+        return build_custom_model(custom_dynamics_fn, nq, nv, nu, input_min, input_max, q_init, integrator_type, obstacle_loader)
     elif model_type == settings.DynamicsModel.MJX:
         return build_mjx_model(config.robot.robot_scene_path, config.robot.mjx_kinematic)
     else:
@@ -266,7 +278,7 @@ def build_model_and_solver(config: settings.Config, objective: BaseObjective, cu
 
 def build_all(config: settings.Config, objective: BaseObjective,
               reference: jnp.array,
-              custom_dynamics_fn: Optional[Callable] = None):
+              custom_dynamics_fn: Optional[Callable] = None, obstacle_loader: ObstacleLoader = None):
     system, x_init, state_init = (None, None, None)
     solver_dynamics_model_setting = config.solver_dynamics
     sim_dynamics_model_setting = config.sim_dynamics
@@ -274,13 +286,13 @@ def build_all(config: settings.Config, objective: BaseObjective,
     solver_dynamics_model, sim_dynamics_model = (None, None)
     solver_x_init, sim_state_init = (None, None)
     if solver_dynamics_model_setting == sim_dynamics_model_setting:
-        system, solver_x_init, sim_state_init = build_model_from_config(solver_dynamics_model_setting, config, custom_dynamics_fn)
+        system, solver_x_init, sim_state_init = build_model_from_config(solver_dynamics_model_setting, config, custom_dynamics_fn, obstacle_loader)
         solver_dynamics_model = system
         sim_dynamics_model = system
     else:
-        system, solver_x_init, _ = build_model_from_config(solver_dynamics_model_setting, config, custom_dynamics_fn)
+        system, solver_x_init, _ = build_model_from_config(solver_dynamics_model_setting, config, custom_dynamics_fn, obstacle_loader)
         solver_dynamics_model = system
-        sim_dynamics_model, _, sim_state_init = build_model_from_config(sim_dynamics_model_setting, config, custom_dynamics_fn)
+        sim_dynamics_model, _, sim_state_init = build_model_from_config(sim_dynamics_model_setting, config, custom_dynamics_fn, obstacle_loader)
 
     if config.solver_type != settings.Solver.MPPI:
         raise NotImplementedError

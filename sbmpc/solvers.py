@@ -136,7 +136,6 @@ class SamplingBasedMPC:
         return self.rollout_single(initial_state, reference, control_variables)
 
     def rollout_single(self, initial_state, reference, control_variables):
-
         cost = 0.0
         curr_state = initial_state
         # rollout_states = jnp.zeros((self.horizon+1, self.model.nx), dtype=self.dtype_general)
@@ -151,12 +150,14 @@ class SamplingBasedMPC:
 
         # if self.config.MPC["augmented_reference"]:
         #     reference = reference.at[1:, -self.model.nu - 1:-1].set(control_variables)
-
+        obstacles = curr_state[self.model.nx:]
         for idx in range(self.horizon):
             # We multiply the cost by the timestep to mimic a continuous time integration and make it work better when
             # changing the timestep and time horizon jointly
-            cost += self.dt*self.cost_and_constraints(curr_state, control_variables[idx, :], reference[idx, :])
-            curr_state = self.model.integrate_rollout_single(curr_state, control_variables[idx, :], self.dt)
+            cost += self.dt*self.cost_and_constraints(curr_state, control_variables[idx, :], reference[idx, :]) # exclude obstacles from integration..?
+            curr_state = jnp.concatenate([self.model.integrate_rollout_single(curr_state[:self.model.nx], control_variables[idx, :], self.dt),obstacles])
+            obstacles = curr_state[self.model.nx:]
+           
             # rollout_states = rollout_states.at[idx+1, :].set(curr_state)
 
         cost += self.dt*self.final_cost_and_constraints(curr_state, reference[self.horizon, :])
@@ -188,7 +189,7 @@ class SamplingBasedMPC:
             curr_input_sens = mppi_gains @ curr_state_sens
             cost_and_constraints = self.cost_and_constraints((curr_state, curr_state_sens), (curr_input, curr_input_sens), reference[idx, :])
             # Integrate the dynamics
-            curr_state = self.model.integrate_rollout_single(curr_state, curr_input, self.dt)
+            curr_state = self.model.integrate_rollout_single(curr_state[:self.model.nx], curr_input, self.dt)
             curr_state_sens = self.model.sensitivity_step(curr_state, curr_input, self.model.nominal_parameters, curr_state_sens, curr_input_sens, self.dt)
             cost += cost_and_constraints
             input_sequence = input_sequence.at[idx, :].set(curr_input)
@@ -198,7 +199,6 @@ class SamplingBasedMPC:
         return cost, input_sequence
 
     def _compute_control_mppi(self, state, reference, best_control_vars, key, gains):
-
         additional_random_parameters = self.sample_input_sequence(key)
 
         if self.config.MPC.smoothing == "Spline":
@@ -276,7 +276,7 @@ class SamplingBasedMPC:
             self.best_control_vars = self._shift_guess(best_control_vars)
         else:
             self.best_control_vars = best_control_vars
-
+        
         return best_control_vars
 
     def _sort_and_clip_costs(self, costs):
