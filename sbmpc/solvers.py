@@ -23,10 +23,10 @@ class BaseObjective(ABC):
         return 0.0
 
     def cost_and_constraints(self, state, inputs, reference):
-        return self.running_cost(state, inputs, reference) + self.make_barrier(self.constraints(state, inputs, reference))
+        return self.running_cost(state, inputs, reference) + jnp.sum(self.make_barrier(self.constraints(state, inputs, reference)))
 
     def final_cost_and_constraints(self, state, reference):
-        return self.final_cost(state, reference) + self.make_barrier(self.terminal_constraints(state, reference))
+        return self.final_cost(state, reference) + jnp.sum(self.make_barrier(self.terminal_constraints(state, reference)))
 
     def make_barrier(self, constraint_array):
         constraint_array = jnp.where(constraint_array > 0, 1e5, constraint_array)

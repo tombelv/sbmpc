@@ -97,8 +97,8 @@ class Objective(BaseObjective):
                 5 * vel_err.transpose() @ vel_err +
                 1 * ang_vel_err.transpose() @ ang_vel_err)
 
-    # def constraints(self, state, inputs, reference):
-    #     return state[0] - 0.4
+    def constraints(self, state, inputs, reference):
+        return jnp.array([state[0] - 0.3, state[1] - 0.4])
 
 
 if __name__ == "__main__":
