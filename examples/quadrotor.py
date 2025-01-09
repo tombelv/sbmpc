@@ -115,8 +115,8 @@ class Objective(BaseObjective):
         
         return constraint_err  # should be scalar
 
-    # def constraints(self, state, inputs, reference):
-    #     return state[0] - 0.4
+    def constraints(self, state, inputs, reference):
+        return jnp.array([state[0] - 0.3, state[1] - 0.4])
 
 
 if __name__ == "__main__":
