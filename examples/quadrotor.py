@@ -11,6 +11,7 @@ import sbmpc.settings as settings
 from sbmpc.simulation import build_all
 from sbmpc.geometry import skew, quat_product, quat2rotm, quat_inverse
 from sbmpc.obstacle_loader import ObstacleLoader
+import mujoco
 
 os.environ['XLA_FLAGS'] = '--xla_gpu_triton_gemm_any=True'
 # Needed to remove warnings, to be investigated
@@ -79,44 +80,38 @@ class Objective(BaseObjective):
         att_err = quat_product(quat_inverse(state[3:7]), state_ref[3:7])[1:4]
         vel_err = state[7:10] - state_ref[7:10]
         ang_vel_err = state[10:13] - state_ref[10:13]
-        cons_err = self.obs_constraints(state)
 
-        return pos_err, att_err, vel_err, ang_vel_err, cons_err
+        return pos_err, att_err, vel_err, ang_vel_err
 
     def running_cost(self, state: jnp.array, inputs: jnp.array, reference) -> jnp.float32:
         state_ref = reference[:13]
         state_ref = state_ref.at[7:10].set(-1*(state[0:3] - state_ref[0:3]))
         input_ref = reference[13:13+4]
-        pos_err, att_err, vel_err, ang_vel_err, cons_err = self.compute_state_error(state, state_ref)
+        pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, state_ref)
         return (5 * vel_err.transpose() @ vel_err +
                 1 * ang_vel_err.transpose() @ ang_vel_err +
-                (inputs-input_ref).transpose() @ jnp.diag(jnp.array([10, 10, 10, 100])) @ (inputs-input_ref) +
-                4 * cons_err)
+                (inputs-input_ref).transpose() @ jnp.diag(jnp.array([10, 10, 10, 100])) @ (inputs-input_ref))
 
     def final_cost(self, state, reference):
-        pos_err, att_err, vel_err, ang_vel_err, cons_err = self.compute_state_error(state, reference[:13])
+        pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, reference[:13])
         return (10 * pos_err.transpose() @ pos_err +
                 1 * att_err.transpose() @ att_err +
                 5 * vel_err.transpose() @ vel_err +
-                1 * ang_vel_err.transpose() @ ang_vel_err +
-                4 * cons_err)
+                1 * ang_vel_err.transpose() @ ang_vel_err) 
     
-    def obs_constraints(self,state): # check if colliding?
-        pos = state[0:3]
-        n_obs = len(state[13:])//3
-        obs_pos = jnp.reshape(state[13:],(n_obs,3))
-        r = obsl.radius
-
-        dist_from_obs = [abs(pos - obs) - r for obs in obs_pos]
-        dist_from_obs = jnp.stack(dist_from_obs)
-     
-        obs_err = jnp.mean(dist_from_obs,axis=1)
-        constraint_err = obs_err.transpose() @ obs_err
-        
-        return constraint_err  # should be scalar
 
     def constraints(self, state, inputs, reference):
-        return jnp.array([state[0] - 0.3, state[1] - 0.4])
+        r = obsl.radius
+        pos = state[0:3] # robot's position
+        n_obs = len(state[13:])//3
+        obs_pos = jnp.reshape(state[13:],(n_obs,3))
+    
+        dist_from_obs = jnp.concatenate([abs(pos - obs) - r for obs in obs_pos]) * -1
+      
+        return dist_from_obs
+
+    # def constraints(self, state, inputs, reference):
+    #     return jnp.array([state[0] - 0.3, state[1] - 0.4])
 
 
 if __name__ == "__main__":
@@ -166,7 +161,7 @@ if __name__ == "__main__":
                     custom_dynamics_fn=quadrotor_dynamics, 
                     obstacle_loader=obsl)
     
-    sim.visualizer.move_obstacles = True # can toggle - currently stationary for constraint modelling
+    sim.visualizer.move_obstacles = True # can toggle -
     sim.simulate() # if interrupted must clear xmls manually
 
     obsl.reset_xmls()

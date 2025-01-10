@@ -65,6 +65,7 @@ class MujocoVisualizer(Visualizer):
                                                    key_callback=self.key_callback)
         self.move_obstacles = move_obstacles
         self.ang = 0
+        self.step = 0.04
        
 
     def key_callback(self, keycode):
@@ -99,21 +100,26 @@ class MujocoVisualizer(Visualizer):
             self.mj_data.qpos = qpos
             
             if self.move_obstacles:  
-                step = 0.1
-                r = 0.4
-            	# origin = (0,0) 
-                origin = (self.mj_data.xpos[2][0], self.mj_data.xpos[2][1]) # obstacles follow drone
-                x = r*np.cos(self.ang) 
-                y = r*np.sin(self.ang)
-                z = self.mj_model.body_pos[1][2]
-                self.mj_model.body_pos[1] = [origin[0] + x, origin[1] + y, z]  # maintain height 
-                self.ang = self.ang + step  # TODO - move obstacles separately by modelling as individual bodies
-            	
-            	# self.mj_model.body_pos[1] = [self.mj_model.body_pos[1][0] + step, self.mj_model.body_pos[1]s[1] + step, self.mj_model.body_pos[1][2] + step] # move obstacles diagonally
-       
+                self.move_obstacles_()
+                
             mujoco.mj_fwdPosition(self.mj_model, self.mj_data)
           
         self.viewer.sync()
+
+    def move_obstacles_(self) -> None:
+        n_obstacles = 3
+        step = self.step
+        r = 0.3
+        # origin = (0,0) 
+        origin = (self.mj_data.xpos[-1][0], self.mj_data.xpos[-1][1],self.mj_data.xpos[-1][2]) # obstacles follow drone 
+        
+        x = r*np.cos(self.ang) 
+        y = r*np.sin(self.ang)
+        for i in range(1,n_obstacles+1):
+            self.mj_model.body_pos[i] = [origin[0] + x, origin[1] + y, origin[2]] # circle drone - maintain height 
+            # self.mj_model.body_pos[i] = [origin[0] - step, origin[1] - step, origin[2] - step] # follow drone at a distance
+            # self.mj_model.body_pos[i] = [self.mj_model.body_pos[i][0] + step, self.mj_model.body_pos[i][1] + step, self.mj_model.body_pos[i][2] + step] # move diagonally 
+        self.ang = self.ang + step  
 
 def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str, move_obstacles: bool):
     mj_model, mj_data = (None, None)

@@ -10,6 +10,8 @@ from abc import ABC, abstractmethod
 
 from sbmpc.filter import cubic_spline_interpolation
 
+import json
+
 
 class BaseObjective(ABC):
     def __init__(self, robot_model=None):
@@ -29,8 +31,11 @@ class BaseObjective(ABC):
         return self.final_cost(state, reference) + jnp.sum(self.make_barrier(self.terminal_constraints(state, reference)))
 
     def make_barrier(self, constraint_array):
-        constraint_array = jnp.where(constraint_array > 0, 1e5, constraint_array)
-        constraint_array = jnp.where(constraint_array <= 0, 0.0, constraint_array)
+        # constraint_array = jnp.where(constraint_array > 0, 1e5, constraint_array)  
+        # constraint_array = jnp.where(constraint_array <= 0, 0.0, constraint_array)
+
+        constraint_array = jnp.where(constraint_array > 0, 5, 0.0)
+
         return constraint_array
 
     def constraints(self, state, inputs, reference):
@@ -154,7 +159,7 @@ class SamplingBasedMPC:
         for idx in range(self.horizon):
             # We multiply the cost by the timestep to mimic a continuous time integration and make it work better when
             # changing the timestep and time horizon jointly
-            cost += self.dt*self.cost_and_constraints(curr_state, control_variables[idx, :], reference[idx, :]) # exclude obstacles from integration..?
+            cost += self.dt*self.cost_and_constraints(curr_state, control_variables[idx, :], reference[idx, :]) # exclude obstacles from integration
             curr_state = jnp.concatenate([self.model.integrate_rollout_single(curr_state[:self.model.nx], control_variables[idx, :], self.dt),obstacles])
             obstacles = curr_state[self.model.nx:]
            
@@ -331,3 +336,4 @@ class SamplingBasedMPC:
             sampled_variation_all)
 
         return additional_random_parameters
+    
