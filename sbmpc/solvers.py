@@ -31,11 +31,8 @@ class BaseObjective(ABC):
         return self.final_cost(state, reference) + jnp.sum(self.make_barrier(self.terminal_constraints(state, reference)))
 
     def make_barrier(self, constraint_array):
-        # constraint_array = jnp.where(constraint_array > 0, 1e5, constraint_array)  
-        # constraint_array = jnp.where(constraint_array <= 0, 0.0, constraint_array)
-
+        # constraint_array = jnp.where(constraint_array > 0, 1e5, 0.0)  
         constraint_array = jnp.where(constraint_array > 0, 5, 0.0)
-
         return constraint_array
 
     def constraints(self, state, inputs, reference):
@@ -139,6 +136,10 @@ class SamplingBasedMPC:
     @partial(jax.vmap, in_axes=(None, None, None, 0), out_axes=(0, 0))
     def rollout_all(self, initial_state, reference, control_variables):
         return self.rollout_single(initial_state, reference, control_variables)
+    
+    # def get_rollout_data(self, data: list):
+    #     # pass data to GP for training
+    #     return 
 
     def rollout_single(self, initial_state, reference, control_variables):
         cost = 0.0
@@ -155,17 +156,21 @@ class SamplingBasedMPC:
 
         # if self.config.MPC["augmented_reference"]:
         #     reference = reference.at[1:, -self.model.nu - 1:-1].set(control_variables)
-        obstacles = curr_state[self.model.nx:]
+
+        constraint_violation = 0
         for idx in range(self.horizon):
             # We multiply the cost by the timestep to mimic a continuous time integration and make it work better when
             # changing the timestep and time horizon jointly
-            cost += self.dt*self.cost_and_constraints(curr_state, control_variables[idx, :], reference[idx, :]) # exclude obstacles from integration
-            curr_state = jnp.concatenate([self.model.integrate_rollout_single(curr_state[:self.model.nx], control_variables[idx, :], self.dt),obstacles])
-            obstacles = curr_state[self.model.nx:]
-           
-            # rollout_states = rollout_states.at[idx+1, :].set(curr_state)
+            cost += self.dt*self.cost_and_constraints(curr_state, control_variables[idx, :], reference[idx, :])
+            curr_state = self.model.integrate_rollout_single(curr_state[:self.model.nx], control_variables[idx, :], self.dt)
+            l1_dist = self.objective.constraints(curr_state, control_variables[idx, :], reference[idx, :])
+            constraint_violation += jnp.sum(l1_dist)
+            # rollout_states = rollout_states. at[idx+1, :].set(curr_state)
 
         cost += self.dt*self.final_cost_and_constraints(curr_state, reference[self.horizon, :])
+        constraint_violation /= self.horizon  # average total l1 distance
+
+        # self.get_rollout_data([initial_state, control_variables, constraint_violation])
 
         return cost, control_variables
 

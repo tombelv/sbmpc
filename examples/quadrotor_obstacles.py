@@ -10,6 +10,8 @@ import sbmpc.settings as settings
 
 from sbmpc.simulation import build_all
 from sbmpc.geometry import skew, quat_product, quat2rotm, quat_inverse
+from sbmpc.obstacle_loader import ObstacleLoader
+import mujoco
 
 os.environ['XLA_FLAGS'] = '--xla_gpu_triton_gemm_any=True'
 # Needed to remove warnings, to be investigated
@@ -66,6 +68,7 @@ def quadrotor_dynamics(state: jnp.array, inputs: jnp.array, params: jnp.array) -
                                  0.5 * quat_product(quat, ang_vel_quat),
                                  orientation_mat @ acc[:3],
                                  acc[3:6]])
+
     return state_dot
 
 
@@ -94,13 +97,25 @@ class Objective(BaseObjective):
         return (10 * pos_err.transpose() @ pos_err +
                 1 * att_err.transpose() @ att_err +
                 5 * vel_err.transpose() @ vel_err +
-                1 * ang_vel_err.transpose() @ ang_vel_err)
+                1 * ang_vel_err.transpose() @ ang_vel_err) 
 
     def constraints(self, state, inputs, reference):
-        return jnp.array([state[0] - 0.3, state[1] - 0.4])
+        r = obsl.radius + 0.1                                           
+        pos = state[0:3]
+        n_obs = len(reference[17:])//3
+        obs_pos = jnp.reshape(reference[17:],(n_obs,3))
+        dist_from_obs = jnp.array([jnp.sum(abs(pos - obs) - r) for obs in obs_pos])  # l1 dist 
+        # dist_from_obs = [jnp.where(jnp.sum(dist) < 0, jnp.positive(dist), jnp.negative(dist)) for dist in dist_from_obs]  # penalise only if x,y and z are in range
+        return dist_from_obs * -1
+
+    # def constraints(self, state, inputs, reference):
+    #     return jnp.array([state[0] - 0.3, state[1] - 0.4])
 
 
 if __name__ == "__main__":
+    obsl = ObstacleLoader()
+    obsl.create_obstacles()
+    obsl.load_obstacles()
 
     robot_config = settings.RobotConfig()
 
@@ -135,17 +150,23 @@ if __name__ == "__main__":
     q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
     x_des = jnp.concatenate([q_des, jnp.zeros(robot_config.nv, dtype=jnp.float32)], axis=0)
 
-    reference = jnp.concatenate((x_des, INPUT_HOVER))
+    horizon = config.MPC.horizon+1
+    traj = obsl.get_obstacle_trajectory(config.sim_iterations,"circle")[:horizon] 
+
+    reference = jnp.concatenate((x_des, INPUT_HOVER))  
+    reference = jnp.tile(reference, (horizon, 1))
+    reference = jnp.concatenate([reference, traj],axis=1)
 
     objective = Objective()
 
     sim = build_all(config, objective,
                     reference,
-                    custom_dynamics_fn=quadrotor_dynamics,
-                    obstacles = False)
+                    custom_dynamics_fn=quadrotor_dynamics)
 
-    sim.simulate()
+    sim.simulate() 
 
+    obsl.reset_xmls()
+ 
     time_vect = config.MPC.dt*jnp.arange(sim.state_traj.shape[0])
     ax = plt.figure().add_subplot(projection='3d')
     # Plot x-y-z position of the robot

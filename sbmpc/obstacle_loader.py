@@ -24,6 +24,9 @@ class ObstacleLoader():
         self.radius = 0.05 # set on line 7
 
         self.model = mujoco.MjModel.from_xml_path(scene_path) 
+        self.data = mujoco.MjData(self.model)
+
+        self.n_obstacles = 3
 
 
     def create_obstacles(self,obstacle_type=basic_sphere):
@@ -31,25 +34,23 @@ class ObstacleLoader():
         root = tree.getroot()
         worldbody = root.find('worldbody')
     
-
         x_range = 0.5  # can scale x, y and z to cover a wider area
         y_range = 0.5
         z_range = 0.5
-        n_obstacles = 3
 
         random_positions = [] 
-        for i in range(n_obstacles):   # generate random positions for the obstacles - perhaps should avoid where the model is generated
+        for i in range(self.n_obstacles):   # generate random positions for the obstacles - perhaps should avoid where the model is generated
             x = round(random.uniform(-1*x_range,1*x_range),3)
             y = round(random.uniform(-1*y_range,1*y_range),3)
             z = round(random.uniform(0,1*z_range), 3)  # don't spawn below floor level
             random_positions.append(f"{x} {y} {z}")
             self.obs_pos.append([x, y, z])
-        self.obs_pos = np.concatenate(self.obs_pos, axis=0) # TODO - fix disparity between bodypos and geom pos
+        self.obs_pos = np.concatenate(self.obs_pos, axis=0) 
         print(f"Created obstacles at {random_positions}")
 
-        # inertial_props = ET.fromstring(inertial) # add some physical properties for collisions TODO - get collisions working
+        # inertial_props = ET.fromstring(inertial) # add some physical properties for collisions 
         
-        for obs in range(n_obstacles):   # add obstacles to obstacles.xml
+        for obs in range(self.n_obstacles):   # add obstacles to obstacles.xml
             body = ET.Element("body", {"name" : "obstacle " + str(obs+1)})
             # body.append(inertial_props)
             obstacle_elem = ET.fromstring(obstacle_type)
@@ -79,7 +80,47 @@ class ObstacleLoader():
         self.original_scene.write(self.scene_path)
         self.original_obstacles.write(self.obstacle_path)
         return
-    
-    def get_obstacle_positions(self):
-        return self.model.body_pos
 
+    def get_obstacle_trajectory(self, iters, function=None):  # for each iteration generate the position of each obstacle according to the chosen trajectory function
+        n = self.n_obstacles
+        traj = np.zeros((iters,n,3))
+        step = 0.05
+        r = 0.4
+        ang = 0 
+        origin = traj[0]
+
+        if function == "circle": 
+            for t in range(iters):
+                x = r*np.cos(ang) 
+                y = r*np.sin(ang) 
+                obstacle_pos = []
+                for i in range(n):
+                    obstacle_pos.append([origin[i][0] + x, origin[i][1] + y, origin[i][2] + (x+y)/2])
+                traj[t] = obstacle_pos
+                ang += step
+
+        elif function == "diagonal":
+            step = 0.005
+            for t in range(iters):
+                obstacle_pos = []
+                for i in range(n):
+                    obstacle_pos.append(origin[i] + step)
+                traj[t] = obstacle_pos
+                origin = traj[t-1]
+        
+        elif function == "sine": 
+            r = 0.05
+            for t in range(iters):
+                x = y = z = r*np.sin(ang) 
+                obstacle_pos = []
+                for i in range(n):
+                    obstacle_pos.append([origin[i][0] + x, origin[i][1] + y, origin[i][2] + z])
+                traj[t] = obstacle_pos
+                origin = traj[t-1]
+                ang += step
+
+        else:  
+            pass   # if no valid funtion selected then keep obstacles stationary
+
+        traj = np.reshape(traj, (iters,n*3))
+        return traj
