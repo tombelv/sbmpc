@@ -1,0 +1,6 @@
+<mujoco model="obstacles">
+<worldbody>
+  <body name="obstacles">
+  </body>
+ </worldbody>
+</mujoco>

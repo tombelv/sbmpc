@@ -103,10 +103,10 @@ class Objective(BaseObjective):
 
 
 class Simulation(Simulator):
-    def __init__(self, initial_state, model, controller, num_iterations: int, visualize: bool = False):
+    def __init__(self, initial_state, model, controller, num_iterations: int, visualize: bool = False, move_obstacles:bool = True):
         visualizer = None
         if visualize:
-            visualizer = construct_mj_visualizer_from_model(model, SCENE_PATH)
+            visualizer = construct_mj_visualizer_from_model(model, SCENE_PATH, move_obstacles=move_obstacles)
         super().__init__(initial_state, model, controller, num_iterations, visualizer)
 
         self.gain_matrix = jnp.zeros((4, 13))
@@ -143,6 +143,7 @@ if __name__ == "__main__":
     config.MPC.gains = True
 
     system = Model(quadrotor_dynamics, nq=7, nv=6, nu=4, input_bounds=[input_min, input_max])
+
     q_init = jnp.array([0., 0., 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
     x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
     state_init = x_init

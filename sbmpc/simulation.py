@@ -10,6 +10,7 @@ import traceback
 from sbmpc.model import BaseModel, Model, ModelMjx
 import sbmpc.settings as settings
 from sbmpc.solvers import BaseObjective, SamplingBasedMPC
+from sbmpc.obstacle_loader import ObstacleLoader
 from typing import Callable, Tuple, Optional, Dict
 
 
@@ -51,9 +52,13 @@ class Visualizer(ABC):
     def set_qpos(self, qpos) -> None:
         pass
 
+    @abstractmethod
+    def move_obstacles(self, iter) -> None:
+        pass
+
 
 class MujocoVisualizer(Visualizer):
-    def __init__(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData, step_mujoco: bool = True, show_left_ui: bool = False, show_right_ui: bool = False):
+    def __init__(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData, step_mujoco: bool = True, show_left_ui: bool = False, show_right_ui: bool = False, num_iters: int = 100):
         self.mj_data = mj_data
         self.mj_model = mj_model
         self.step_mujoco = step_mujoco
@@ -62,6 +67,8 @@ class MujocoVisualizer(Visualizer):
                                                    show_left_ui=show_left_ui,
                                                    show_right_ui=show_right_ui,
                                                    key_callback=self.key_callback)
+        self.obsl = ObstacleLoader()
+        self.obstacle_ref = self.obsl.get_obstacle_trajectory(num_iters, function="circle")
 
     def key_callback(self, keycode):
         if chr(keycode) == ' ':
@@ -92,12 +99,20 @@ class MujocoVisualizer(Visualizer):
 
     def set_qpos(self, qpos) -> None:
         if self.step_mujoco:
-            self.mj_data.qpos = qpos
+            self.mj_data.qpos = qpos    
             mujoco.mj_fwdPosition(self.mj_model, self.mj_data)
         self.viewer.sync()
 
-def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str):
+    def move_obstacles(self, iter) -> None: # set obstacle positions in model according to precomputed trajectory
+        n = self.obsl.n_obstacles
+        obs_pos = self.obstacle_ref[iter-1]
+        obs_pos = np.reshape(obs_pos, (n,3))
+        for i in range(1,n+1): 
+            self.mj_model.body_pos[i] = obs_pos[i-1]
+
+def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str, num_iters: int):
     mj_model, mj_data = (None, None)
+
     step_mujoco = True
     if isinstance(model, ModelMjx):
         mj_model = model.mj_model
@@ -106,17 +121,19 @@ def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str):
         new_system = ModelMjx(scene_path)
         mj_model = new_system.mj_model
         mj_data = new_system.mj_data
-    visualizer = MujocoVisualizer(mj_model, mj_data, step_mujoco=step_mujoco)
+
+    visualizer = MujocoVisualizer(mj_model, mj_data, step_mujoco=step_mujoco, num_iters=num_iters) 
     return visualizer
 
 
 class Simulator(ABC):
-    def __init__(self, initial_state, model: BaseModel, controller, num_iter=100, visualizer: Optional[Visualizer] = None):
+    def __init__(self, initial_state, model: BaseModel, controller, num_iter=100, visualizer: Optional[Visualizer] = None, obstacles:bool = True):
         self.iter = 0
         self.current_state = initial_state
         self.model = model
         self.controller = controller
         self.num_iter = num_iter
+        self.obstacles = obstacles
 
         if isinstance(initial_state, (np.ndarray, jnp.ndarray)):
             self.current_state_vec = lambda: self.current_state
@@ -131,12 +148,12 @@ class Simulator(ABC):
         self.state_traj = np.zeros(
             (self.num_iter + 1, self.current_state_vec().size))
 
-        self.state_traj[0, :] = self.current_state_vec()
+        self.state_traj[0, :] = self.current_state_vec() #[:self.model.nx]
         self.input_traj = np.zeros((self.num_iter, model.nu))
-
         self.visualizer = visualizer
 
         self.paused = False
+        self.obstacles = obstacles
 
     @abstractmethod
     def update(self):
@@ -155,6 +172,9 @@ class Simulator(ABC):
 
                         self.visualizer.set_qpos(self.current_state_vec()[
                             :self.model.get_nq()])
+                        
+                        if self.obstacles:
+                            self.visualizer.move_obstacles(self.iter)
 
                         time_until_next_step = self.controller.dt - \
                             (time.time() - step_start)
@@ -178,16 +198,16 @@ class Simulator(ABC):
 ROBOT_SCENE_PATH_KEY = "robot_scene_path"
 
 class Simulation(Simulator):
-    def __init__(self, initial_state, model, controller, const_reference: jnp.array, num_iterations: int, visualize: bool = True, visualize_params: Optional[Dict] = None):
+    def __init__(self, initial_state, model, controller, const_reference: jnp.array, num_iterations: int, visualize: bool = True, visualize_params: Optional[Dict] = None, obstacles:bool = True):
         self.const_reference = const_reference
         visualizer = None
         if visualize:
             scene_path = visualize_params.get(ROBOT_SCENE_PATH_KEY, None)
             if visualize_params is None or scene_path is None:
                 raise ValueError("if visualizing need to input scene path for mjx")
-            visualizer = construct_mj_visualizer_from_model(model, scene_path)
+            visualizer = construct_mj_visualizer_from_model(model, scene_path=scene_path, num_iters=num_iterations)
 
-        super().__init__(initial_state, model, controller, num_iterations, visualizer)
+        super().__init__(initial_state, model, controller, num_iterations, visualizer, obstacles)
 
     def update(self):
         # Compute the optimal input sequence
@@ -200,11 +220,11 @@ class Simulation(Simulator):
 
         # Simulate the dynamics
         self.current_state = self.model.integrate(self.current_state, ctrl, self.controller.dt)
-        self.state_traj[self.iter + 1, :] = self.current_state_vec()
+        self.state_traj[self.iter + 1,  :] = self.current_state_vec() #[:self.model.nx] # set only qpos and qvel
 
 
 def build_custom_model(custom_dynamics_fn: Callable, nq: int, nv: int, nu: int, input_min: jnp.array, input_max: jnp.array,
-                        q_init: jnp.array, integrator_type: str ="si_euler") -> Tuple[BaseModel, jnp.array, jnp.array]:
+                        q_init: jnp.array, integrator_type: str ="si_euler", obstacle_loader: ObstacleLoader = None) -> Tuple[BaseModel, jnp.array, jnp.array]:
     system = Model(custom_dynamics_fn, nq=nq, nv=nv, nu=nu, input_bounds=[input_min, input_max], integrator_type=integrator_type)
     x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
     state_init = x_init
@@ -218,7 +238,7 @@ def build_mjx_model(scene_path: str, kinematic: bool = False) -> Tuple[BaseModel
     state_init = system.data
     return system, x_init, state_init
 
-def build_model_from_config(model_type: settings.DynamicsModel, config: settings.Config, custom_dynamics_fn: Optional[Callable] = None):
+def build_model_from_config(model_type: settings.DynamicsModel, config: settings.Config, custom_dynamics_fn: Optional[Callable] = None, obstacle_loader: ObstacleLoader = True):
     if model_type == settings.DynamicsModel.CUSTOM:
         if custom_dynamics_fn is None:
             raise ValueError("for classic dynamics model, a custom dynamics function must be passed. See examples.")
@@ -229,7 +249,7 @@ def build_model_from_config(model_type: settings.DynamicsModel, config: settings
         input_max = config.robot.input_max
         q_init = config.robot.q_init
         integrator_type = config.general.integrator_type
-        return build_custom_model(custom_dynamics_fn, nq, nv, nu, input_min, input_max, q_init, integrator_type)
+        return build_custom_model(custom_dynamics_fn, nq, nv, nu, input_min, input_max, q_init, integrator_type, obstacle_loader)
     elif model_type == settings.DynamicsModel.MJX:
         return build_mjx_model(config.robot.robot_scene_path, config.robot.mjx_kinematic)
     else:
@@ -245,7 +265,8 @@ def build_model_and_solver(config: settings.Config, objective: BaseObjective, cu
 
 def build_all(config: settings.Config, objective: BaseObjective,
               reference: jnp.array,
-              custom_dynamics_fn: Optional[Callable] = None):
+              custom_dynamics_fn: Optional[Callable] = None, 
+              obstacles: bool = True):
     system, x_init, state_init = (None, None, None)
     solver_dynamics_model_setting = config.solver_dynamics
     sim_dynamics_model_setting = config.sim_dynamics
@@ -273,6 +294,6 @@ def build_all(config: settings.Config, objective: BaseObjective,
 
     # Setup and run the simulation
     num_iterations = config.sim_iterations
-    sim = Simulation(sim_state_init, sim_dynamics_model, solver, reference, num_iterations, visualize, visualizer_params)
+    sim = Simulation(sim_state_init, sim_dynamics_model, solver, reference, num_iterations, visualize, visualizer_params, obstacles)
     return sim
 
