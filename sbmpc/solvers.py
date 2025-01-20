@@ -12,6 +12,7 @@ from sbmpc.filter import cubic_spline_interpolation
 
 import json
 
+import numpy as np
 
 class BaseObjective(ABC):
     def __init__(self, robot_model=None):
@@ -136,10 +137,6 @@ class SamplingBasedMPC:
     @partial(jax.vmap, in_axes=(None, None, None, 0), out_axes=(0, 0))
     def rollout_all(self, initial_state, reference, control_variables):
         return self.rollout_single(initial_state, reference, control_variables)
-    
-    # def get_rollout_data(self, data: list):
-    #     # pass data to GP for training
-    #     return 
 
     def rollout_single(self, initial_state, reference, control_variables):
         cost = 0.0
@@ -157,20 +154,15 @@ class SamplingBasedMPC:
         # if self.config.MPC["augmented_reference"]:
         #     reference = reference.at[1:, -self.model.nu - 1:-1].set(control_variables)
 
-        constraint_violation = 0
         for idx in range(self.horizon):
             # We multiply the cost by the timestep to mimic a continuous time integration and make it work better when
             # changing the timestep and time horizon jointly
             cost += self.dt*self.cost_and_constraints(curr_state, control_variables[idx, :], reference[idx, :])
             curr_state = self.model.integrate_rollout_single(curr_state[:self.model.nx], control_variables[idx, :], self.dt)
             l1_dist = self.objective.constraints(curr_state, control_variables[idx, :], reference[idx, :])
-            constraint_violation += jnp.sum(l1_dist)
             # rollout_states = rollout_states. at[idx+1, :].set(curr_state)
 
         cost += self.dt*self.final_cost_and_constraints(curr_state, reference[self.horizon, :])
-        constraint_violation /= self.horizon  # average total l1 distance
-
-        # self.get_rollout_data([initial_state, control_variables, constraint_violation])
 
         return cost, control_variables
 
@@ -245,6 +237,51 @@ class SamplingBasedMPC:
         optimal_action = best_control_vars + jnp.sum(weighted_inputs, axis=0)
 
         return optimal_action, gains
+    
+    @partial(jax.vmap, in_axes=(None, None, None, 0), out_axes=(0)) # map original shape => 1000
+    def get_rollout(self, initial_state, reference, control_variables):
+        curr_state = initial_state
+        if self.config.MPC.smoothing == "Spline":
+            control_interp = cubic_spline_interpolation(jnp.arange(0, self.horizon, self.control_points_sparsity),control_variables,
+                                                        jnp.arange(0, self.horizon))
+            control_variables = self.clip_input_single(control_interp)
+        else:
+            control_variables = self.clip_input_single(control_variables)
+
+        constraint_violation = 0
+        for idx in range(self.horizon):
+            curr_state = self.model.integrate_rollout_single(curr_state[:self.model.nx], control_variables[idx, :], self.dt)
+            l1_dist = self.objective.constraints(self, state=curr_state, inputs=control_variables[idx, :], reference=reference[idx, :])
+            constraint_violation += jnp.sum(l1_dist)
+
+        constraint_violation /= self.horizon  # average total l1 distance
+        return initial_state, jnp.array(control_variables), jnp.array(constraint_violation)
+    
+    def get_rollouts(self, state, reference, shift_guess=True, num_steps=1): 
+        if reference.ndim == 1:
+            reference = jnp.tile(reference, (self.horizon+1, 1))
+
+        best_control_vars = self.best_control_vars
+        rollouts = []
+        for i in range(num_steps):
+            additional_random_parameters = self.sample_input_sequence(self.master_key)
+            if self.config.MPC.smoothing == "Spline":
+                control_vars_all = best_control_vars[::self.control_points_sparsity, :] + additional_random_parameters
+            else:
+                control_vars_all = best_control_vars + additional_random_parameters
+
+            if self.config.MPC.sensitivity:
+                # costs, control_vars_all = self.rollout_with_sensitivity(state, reference, control_vars_all, gains) # TODO - replace this and the below
+                pass
+            else:
+                if self.compute_gains:
+                    # (costs, control_vars_all), gradients = self.rollout_sens_to_state(state, reference, control_vars_all)
+                    pass
+                else:
+                    rollouts.append(self.get_rollout(state, reference, control_vars_all)) 
+                self._update_key()
+
+        return rollouts
 
     def command(self, state, reference, shift_guess=True, num_steps=1):
         """
@@ -288,6 +325,7 @@ class SamplingBasedMPC:
             self.best_control_vars = best_control_vars
         
         return best_control_vars
+    
 
     def _sort_and_clip_costs(self, costs):
         # Saturate the cost in case of NaN or inf
