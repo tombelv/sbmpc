@@ -220,6 +220,7 @@ class Simulation(Simulator):
 
         # Simulate the dynamics
         self.current_state = self.model.integrate(self.current_state, ctrl, self.controller.dt)
+        print(self.current_state) 
         self.state_traj[self.iter + 1,  :] = self.current_state_vec() #[:self.model.nx] # set only qpos and qvel
 
 
@@ -297,3 +298,22 @@ def build_all(config: settings.Config, objective: BaseObjective,
     sim = Simulation(sim_state_init, sim_dynamics_model, solver, reference, num_iterations, visualize, visualizer_params, obstacles)
     return sim
 
+
+class BG_Simulator(Simulator):  # background simulator for generating rollouts 
+    def __init__(self, initial_state, model, controller, reference, num_iter=100, visualizer = None, obstacles = True):
+        super().__init__(initial_state, model, controller, num_iter, visualizer, obstacles)
+        self.reference = reference
+
+    def update(self):
+        return super().update()
+    
+    def run(self): # called from gp.py
+        curr_rollouts, best_control_vars = self.controller.get_rollouts(self.current_state_vec(), self.reference, num_steps=1) # call solver with curent state vector
+        ctrl = best_control_vars[0, :]
+        self.input_traj[self.iter, :] = ctrl
+
+        self.current_state = self.model.integrate(self.current_state, ctrl, self.controller.dt)  # update current state
+        self.state_traj[self.iter + 1,  :] = self.current_state_vec()
+
+        return curr_rollouts
+    
