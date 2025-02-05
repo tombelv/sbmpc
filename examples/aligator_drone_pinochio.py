@@ -10,6 +10,11 @@ from pinocchio.robot_wrapper import RobotWrapper
 from pinocchio.visualize import MeshcatVisualizer
 from proxsuite_nlp import constraints
 
+from quadrotor import get_quadroter_config, quadrotor_dynamics
+from sbmpc.simulation import build_model_from_config
+from sbmpc import settings
+from sbmpc.geometry import quat2rotm
+
 URDF_FILE_NAME_PATH = os.path.join(os.path.dirname(__file__), "crazyfly_urdf", "cf2x.urdf")
 
 SPHERE_CENTERS = np.array([[0, 1, 0.5],
@@ -79,10 +84,13 @@ robot = builder(
             )
 
 ub = robot.model.upperPositionLimit
-ub[:7] = 1
+ub[0:3] = 10
+ub[3:7] = 2
 robot.model.upperPositionLimit = ub
 lb = robot.model.lowerPositionLimit
-lb[:7] = -1
+lb[0:2] = -10
+lb[2] = 0
+ub[3:7] = -2
 robot.model.lowerPositionLimit = lb
 
 rmodel = robot.model
@@ -93,6 +101,8 @@ ROT_NULL = np.eye(3)
 SPACE = manifolds.MultibodyPhaseSpace(rmodel)
 X_TARGET = SPACE.neutral()
 X_TARGET[:3] = (0, 3, 0.5)
+X0_INIT = np.concatenate([robot.q0, np.zeros(nv)])
+
 
 def create_halfspace_z(ndx, nu, offset: float = 0.0, neg: bool = False):
     r"""
@@ -168,9 +178,13 @@ def main(display: bool = True, integrator: str = "euler"):
     ode_dynamics = aligator.dynamics.MultibodyFreeFwdDynamics(SPACE, QUAD_ACT_MATRIX)
 
     dt = 0.01
-    Tf = 5
-    nsteps = int(Tf / dt)
+    nsteps = 10
+    Tf = nsteps * dt
+    times = np.linspace(0, Tf, nsteps + 1)
     print("nsteps: {:d}".format(nsteps))
+
+    idx_switch = int(0.7 * nsteps)
+    times_wp = [times[idx_switch], times[-1]]
 
     if integrator == "euler":
         dynmodel = aligator.dynamics.IntegratorEuler(ode_dynamics, dt)
@@ -184,16 +198,10 @@ def main(display: bool = True, integrator: str = "euler"):
         raise ValueError()
     
 
-    x0 = np.concatenate([robot.q0, np.zeros(nv)])
-
     # solving dynamics, tau for position, velocity, rotation. solving direct dynamics.
     tau = pin.rnea(rmodel, rdata, robot.q0, np.zeros(nv), np.zeros(nv))
     u0, _, _, _ = np.linalg.lstsq(QUAD_ACT_MATRIX, tau, rcond=-1)
-
-    us_init = [u0] * nsteps
-    xs_init = aligator.rollout(dynmodel, x0, us_init)
-
-
+    u0 = np.zeros((nu,), dtype=np.float32)
 
     # adding targets 
     objective_color = np.array([5, 104, 143, 200]) / 255.0
@@ -202,13 +210,6 @@ def main(display: bool = True, integrator: str = "euler"):
     )
     sp1_obj.meshColor[:] = objective_color
     robot.visual_model.addGeometryObject(sp1_obj)
-
-    # u_max = u_lim * np.ones(nu)
-    # u_min = np.zeros(nu)
-
-    times = np.linspace(0, Tf, nsteps + 1)
-    idx_switch = int(0.7 * nsteps)
-    times_wp = [times[idx_switch], times[-1]]
 
     weights = np.zeros(SPACE.ndx)
     weights[:3] = 0.1
@@ -220,7 +221,11 @@ def main(display: bool = True, integrator: str = "euler"):
 
     task_schedule = _schedule
 
-    def setup() -> aligator.TrajOptProblem:
+    # u_max = u_lim * np.ones(nu)
+    # u_min = np.zeros(nu)
+
+
+    def setup(x0, u0) -> aligator.TrajOptProblem:
         w_u = np.eye(nu) * 1e-1
 
         wterm, x_tar = task_schedule(nsteps)
@@ -266,27 +271,62 @@ def main(display: bool = True, integrator: str = "euler"):
         return prob
 
     _, x_term = task_schedule(nsteps)
-    problem = setup()
-
+    problem = setup(X0_INIT, u0)
 
     tol = 1e-4
     mu_init = 1.0
     verbose = aligator.VerboseLevel.VERBOSE
     history_cb = aligator.HistoryCallback()
     solver = aligator.SolverProxDDP(tol, mu_init, verbose=verbose)
-    solver.max_iters = 400
+    solver.max_iters = 50
     solver.registerCallback("his", history_cb)
     solver.bcl_params.dyn_al_scale = 1e-6
     solver.setup(problem)
-    solver.run(problem, xs_init, us_init)
 
     results = solver.results
     print(results)
 
+    us_init = [u0] * nsteps
+    xs_init = aligator.rollout(dynmodel, X0_INIT, us_init)
+    solver.run(problem, xs_init, us_init)
     xs_opt = results.xs.tolist()
     us_opt = results.us.tolist()
+    control_input = results.us.tolist()[0]
+
+    config = get_quadroter_config()
+    sim_dynamics_model_setting = config.sim_dynamics
+    dyn_model = settings.DynamicsModel.MJX
+    sim_dynamics_model, _, new_state = build_model_from_config(dyn_model, config, None)
 
     xs_opt_arr = np.array(xs_opt)
+
+    stage_model = problem.stages
+    stage_data = stage_model[nsteps - 1].createData()
+
+    # solver.cycleProblem(problem, stage_data)
+    print("hi")
+
+    x0 = X0_INIT
+
+    while np.linalg.norm(x0 - X_TARGET) > 0.1:
+        
+
+        us_init = [u0] * nsteps
+        xs_init = aligator.rollout(dynmodel, x0, us_init)
+        converged = solver.run(problem, xs_init, us_init)
+        control_input = results.us.tolist()[0]
+        new_state = sim_dynamics_model.integrate(new_state, control_input, dt)
+        x0 = np.concatenate(
+                [new_state.qpos, new_state.qvel])
+        # re-ordering quaternion, pinocchio does x y z w, mjx does w x y z
+        x0[3:7] = x0[[4, 5, 6, 3]]
+        rot = quat2rotm(x0[3:7])
+        euler = pin.rpy.matrixToRpy(np.matrix(rot))
+        
+        # res = pin.isNormalized(rmodel, x0)
+        res = SPACE.isNormalized(x0)
+        # solver.cycleProblem(problem, stage_data)
+        problem = setup(x0, u0)
 
     if display:
         fig = plt.figure()

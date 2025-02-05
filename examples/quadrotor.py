@@ -102,9 +102,7 @@ class Objective(BaseObjective):
     # def constraints(self, state, inputs, reference):
     #     return state[0] - 0.4
 
-
-if __name__ == "__main__":
-
+def get_quadroter_config() -> settings.Config:
     config = settings.Config()
     config.general.visualize = True
     config.MPC.dt = 0.02
@@ -128,6 +126,12 @@ if __name__ == "__main__":
 
     config.solver_dynamics = settings.DynamicsModel.CUSTOM
     config.sim_dynamics = settings.DynamicsModel.MJX
+    return config
+
+
+if __name__ == "__main__":
+
+    config = get_quadroter_config()
 
     # x_init = jnp.concatenate([config.robot[settings.ROBOT_Q_INIT_KEY],
     #                  jnp.zeros(config.robot[settings.ROBOT_NV_KEY], dtype=jnp.float32)], axis=0)
