@@ -1,4 +1,5 @@
 import os
+import time
 
 import aligator
 from aligator import manifolds
@@ -20,6 +21,8 @@ URDF_FILE_NAME_PATH = os.path.join(os.path.dirname(__file__), "crazyfly_urdf", "
 SPHERE_CENTERS = np.array([[0, 1, 0.5],
                            [0, 2, 0.5]])
 SPHERE_RADIUS = 0.3
+MASS = 0.027
+GRAVITY = 9.81
 
 
 # The actuation matrix below maps controls to forces and torques
@@ -103,6 +106,51 @@ X_TARGET = SPACE.neutral()
 X_TARGET[:3] = (0, 3, 0.5)
 X0_INIT = np.concatenate([robot.q0, np.zeros(nv)])
 
+def setup(x0, u0, nu, weights, w_u, floor, ctrl_cstr, dt, dynmodel, quad_radius, nsteps) -> aligator.TrajOptProblem:
+
+    # def running_cost(self, state: jnp.array, inputs: jnp.array, reference) -> jnp.float32:
+    #     state_ref = reference[:13]
+    #     state_ref = state_ref.at[7:10].set(-1*(state[0:3] - state_ref[0:3]))
+    #     input_ref = reference[13:13+4]
+    #     pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, state_ref)
+    #     return (5 * vel_err.transpose() @ vel_err +
+    #             1 * ang_vel_err.transpose() @ ang_vel_err +
+    #             (inputs-input_ref).transpose() @ jnp.diag(jnp.array([10, 10, 10, 100])) @ (inputs-input_ref))
+
+    # def final_cost(self, state, reference):
+    #     pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, reference[:13])
+    #     return (10 * pos_err.transpose() @ pos_err +
+    #             1 * att_err.transpose() @ att_err +
+    #             5 * vel_err.transpose() @ vel_err +
+    #             1 * ang_vel_err.transpose() @ ang_vel_err)
+
+
+        term_cost = aligator.QuadraticStateCost(SPACE, nu, X_TARGET, np.diag(weights))
+        prob = aligator.TrajOptProblem(x0, nu, SPACE, term_cost=term_cost)
+
+        for i in range(nsteps):
+            rcost = aligator.CostStack(SPACE, nu)
+
+            xreg_cost = aligator.QuadraticStateCost(
+                SPACE, nu, X_TARGET, np.diag(weights) * dt
+            )
+            rcost.addCost(xreg_cost)
+
+            ureg_cost = aligator.QuadraticControlCost(SPACE, u0, w_u * dt)
+            rcost.addCost(ureg_cost)
+
+            stage = aligator.StageModel(rcost, dynmodel)
+            stage.addConstraint(*ctrl_cstr)
+            for i in range(SPHERE_CENTERS.shape[0]):
+                sphere_coords = SPHERE_CENTERS[i]
+                sphr = Sphere(rmodel, SPACE.ndx, nu, sphere_coords, SPHERE_RADIUS, quad_radius
+                )
+                stage.addConstraint(floor, constraints.NegativeOrthant())
+                stage.addConstraint(sphr, constraints.NegativeOrthant())
+
+            prob.addStage(stage)
+        return prob
+
 
 def create_halfspace_z(ndx, nu, offset: float = 0.0, neg: bool = False):
     r"""
@@ -174,17 +222,14 @@ def main(display: bool = True, integrator: str = "euler"):
 
     nu = QUAD_ACT_MATRIX.shape[1]
 
-    
     ode_dynamics = aligator.dynamics.MultibodyFreeFwdDynamics(SPACE, QUAD_ACT_MATRIX)
 
     dt = 0.01
-    nsteps = 10
+    # 6 or 10 is interesting
+    nsteps = 25
     Tf = nsteps * dt
     times = np.linspace(0, Tf, nsteps + 1)
     print("nsteps: {:d}".format(nsteps))
-
-    idx_switch = int(0.7 * nsteps)
-    times_wp = [times[idx_switch], times[-1]]
 
     if integrator == "euler":
         dynmodel = aligator.dynamics.IntegratorEuler(ode_dynamics, dt)
@@ -199,9 +244,10 @@ def main(display: bool = True, integrator: str = "euler"):
     
 
     # solving dynamics, tau for position, velocity, rotation. solving direct dynamics.
-    tau = pin.rnea(rmodel, rdata, robot.q0, np.zeros(nv), np.zeros(nv))
-    u0, _, _, _ = np.linalg.lstsq(QUAD_ACT_MATRIX, tau, rcond=-1)
+    # tau = pin.rnea(rmodel, rdata, robot.q0, np.zeros(nv), np.zeros(nv))
+    # u0, _, _, _ = np.linalg.lstsq(QUAD_ACT_MATRIX, tau, rcond=-1)
     u0 = np.zeros((nu,), dtype=np.float32)
+    u0[0] = MASS * GRAVITY
 
     # adding targets 
     objective_color = np.array([5, 104, 143, 200]) / 255.0
@@ -216,79 +262,36 @@ def main(display: bool = True, integrator: str = "euler"):
     weights[3:6] = 1e-2
     weights[nv:] = 1e-3
 
-    def _schedule(i):
-        return weights, X_TARGET
 
-    task_schedule = _schedule
+    u_max = np.zeros(nu, dtype=np.float32)
+    u_max[0] = 50
+    u_max[1:4] = np.pi * 2 * 10
+    u_min = np.zeros(nu, dtype=np.float32)
+    u_min[1:4] = -np.pi * 2 * 10
 
-    # u_max = u_lim * np.ones(nu)
-    # u_min = np.zeros(nu)
+    w_u = np.eye(nu) * 1e-1
+    floor = create_halfspace_z(SPACE.ndx, nu, 0.0, True)
 
+    u_identity_fn = aligator.ControlErrorResidual(SPACE.ndx, np.zeros(nu))
+    box_set = constraints.BoxConstraint(u_min, u_max)
+    ctrl_cstr = (u_identity_fn, box_set)
 
-    def setup(x0, u0) -> aligator.TrajOptProblem:
-        w_u = np.eye(nu) * 1e-1
-
-        wterm, x_tar = task_schedule(nsteps)
-        # if not args.term_cstr:
-        wterm *= 12.0
-        term_cost = aligator.QuadraticStateCost(SPACE, nu, x_tar, np.diag(wterm))
-        prob = aligator.TrajOptProblem(x0, nu, SPACE, term_cost=term_cost)
-
-        floor = create_halfspace_z(SPACE.ndx, nu, 0.0, True)
-
-        #     u_identity_fn = aligator.ControlErrorResidual(space.ndx, np.zeros(nu))
-        #     box_set = constraints.BoxConstraint(u_min, u_max)
-        #     ctrl_cstr = (u_identity_fn, box_set)
-
-        for i in range(nsteps):
-            rcost = aligator.CostStack(SPACE, nu)
-
-            weights, x_tar = task_schedule(i)
-
-            xreg_cost = aligator.QuadraticStateCost(
-                SPACE, nu, x_tar, np.diag(weights) * dt
-            )
-            rcost.addCost(xreg_cost)
-            ureg_cost = aligator.QuadraticControlCost(SPACE, u0, w_u * dt)
-            rcost.addCost(ureg_cost)
-
-            stage = aligator.StageModel(rcost, dynmodel)
-            # if bounds
-            # stage.addConstraint(*ctrl_cstr)
-            for i in range(SPHERE_CENTERS.shape[0]):
-                sphere_coords = SPHERE_CENTERS[i]
-                sphr = Sphere(rmodel, SPACE.ndx, nu, sphere_coords, SPHERE_RADIUS, quad_radius
-                )
-                stage.addConstraint(floor, constraints.NegativeOrthant())
-                stage.addConstraint(sphr, constraints.NegativeOrthant())
-
-            prob.addStage(stage)
-        # if args.term_cstr:
-        #     prob.addTerminalConstraint(
-        #         aligator.StateErrorResidual(space, nu, x_tar),
-        #         constraints.EqualityConstraintSet(),
-        #     )
-        return prob
-
-    _, x_term = task_schedule(nsteps)
-    problem = setup(X0_INIT, u0)
+    problem = setup(X0_INIT, u0, nu, weights, w_u, floor, ctrl_cstr, dt, dynmodel, quad_radius, nsteps)
 
     tol = 1e-4
     mu_init = 1.0
-    verbose = aligator.VerboseLevel.VERBOSE
+    # verbose = aligator.VerboseLevel.VERBOSE
     history_cb = aligator.HistoryCallback()
-    solver = aligator.SolverProxDDP(tol, mu_init, verbose=verbose)
-    solver.max_iters = 50
+    solver = aligator.SolverProxDDP(tol, mu_init) # , verbose=verbose
+    solver.max_iters = 200
     solver.registerCallback("his", history_cb)
     solver.bcl_params.dyn_al_scale = 1e-6
     solver.setup(problem)
 
-    results = solver.results
-    print(results)
-
     us_init = [u0] * nsteps
     xs_init = aligator.rollout(dynmodel, X0_INIT, us_init)
     solver.run(problem, xs_init, us_init)
+    results = solver.results
     xs_opt = results.xs.tolist()
     us_opt = results.us.tolist()
     control_input = results.us.tolist()[0]
@@ -304,51 +307,127 @@ def main(display: bool = True, integrator: str = "euler"):
     stage_data = stage_model[nsteps - 1].createData()
 
     # solver.cycleProblem(problem, stage_data)
-    print("hi")
 
     x0 = X0_INIT
 
-    while np.linalg.norm(x0 - X_TARGET) > 0.1:
-        
+    trajectory = [x0]
+    controls = []
+    dd = dynmodel.createData()
 
+    iter_counter = 0
+    max_iterations = 2000
+    times = []
+
+    while np.linalg.norm(x0[[0, 1, 2, 7,8,9,10,11,12]] - X_TARGET[[0, 1, 2, 7,8,9,10,11,12]]) > 0.1 and iter_counter <= max_iterations:
+        start_time = time.time()
         us_init = [u0] * nsteps
         xs_init = aligator.rollout(dynmodel, x0, us_init)
         converged = solver.run(problem, xs_init, us_init)
+        if not converged:
+            print(x0)
+            print(iter_counter)
+            print(xs_init[0])
+            print(us_init)
+            raise RuntimeError
+        results = solver.results
         control_input = results.us.tolist()[0]
-        new_state = sim_dynamics_model.integrate(new_state, control_input, dt)
-        x0 = np.concatenate(
-                [new_state.qpos, new_state.qvel])
-        # re-ordering quaternion, pinocchio does x y z w, mjx does w x y z
-        x0[3:7] = x0[[4, 5, 6, 3]]
-        rot = quat2rotm(x0[3:7])
-        euler = pin.rpy.matrixToRpy(np.matrix(rot))
+        controls.append(np.copy(control_input))
+        dynmodel.forward(x0, control_input, dd)
+        # new_state = sim_dynamics_model.integrate(new_state, control_input, dt)
+        # x0 = np.concatenate(
+        #         [new_state.qpos, new_state.qvel])
+        # # re-ordering quaternion, pinocchio does x y z w, mjx does w x y z
+        # x0[3:7] = x0[[4, 5, 6, 3]]
+        # rot = quat2rotm(x0[3:7])
+        # euler = pin.rpy.matrixToRpy(np.matrix(rot))
+
+        x0 = np.copy(dd.xnext)
+
+        trajectory.append(x0)
         
         # res = pin.isNormalized(rmodel, x0)
-        res = SPACE.isNormalized(x0)
-        # solver.cycleProblem(problem, stage_data)
-        problem = setup(x0, u0)
+        # res = SPACE.isNormalized(x0)
+        # problem.replaceStageCircular(problem.stages[0])
+        # aligator.rotate_vec_left(problem.stages)
+        # solver.cycleProblem(problem, problem.stages[nsteps - 1].createData())
+
+        problem = setup(x0, u0, nu, weights, w_u, floor, ctrl_cstr, dt, dynmodel, quad_radius, nsteps)
+        iter_counter += 1
+        times.append(time.time() - start_time)
+
+        
+
+    trajectory = np.array(trajectory)
+    controls = np.array(controls)
+    print(f"avg time per iteration: {round(sum(times) / len(times), 5)} seconds")
+    print(f"total iterations: {iter_counter}, delta_time: {dt}")
+    print(f"goal: {X_TARGET}, final_state: {x0}, norm diff: {np.linalg.norm(X_TARGET - x0)}")
+
+
 
     if display:
-        fig = plt.figure()
+
+        times = np.arange(trajectory.shape[0]) * dt
+
+        fig = plt.figure(figsize=(10, 8))
+        fig.suptitle("Trajectory with Obstacles, Goals, and Initial Position")
         ax = fig.add_subplot(111, projection='3d')
         ax.set_xlim(-5, 5)
         ax.set_ylim(-5, 5)
         ax.set_zlim(0, 5)
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        ax.set_zlabel("z")
 
-        ax.plot(xs_opt_arr[:, 0], xs_opt_arr[:, 1], xs_opt_arr[:, 2], label="trajectory")
+        ax.plot(trajectory[:, 0], trajectory[:, 1], trajectory[:, 2], label="trajectory")
 
         ax.scatter(X_TARGET[0], X_TARGET[1], X_TARGET[2], s=[10], c="red", label="goal")
-        ax.scatter(x0[0], x0[1], x0[2], s=[10], c="green", label="x0")
+        ax.scatter(X0_INIT[0], X0_INIT[1], X0_INIT[2], s=[10], c="green", label="x0")
         for i in range(SPHERE_CENTERS.shape[0]):
             sphere_coords = SPHERE_CENTERS[i]
             legend = None
             if i == 0:
                 legend = "obstacle"
             ax.scatter(sphere_coords[0], sphere_coords[1], sphere_coords[2], c="purple", label=legend, s=[10])
-
-
         ax.legend()
         plt.show()
+
+        fig, axes = plt.subplots(3, 1, sharex=True, sharey=True, figsize=(10, 8))
+        labels = ["x_position_meters", "y_position_meters", "z_position_meters"]
+        for i in range(3):
+            axes[i].plot(times, trajectory[:, i])
+            axes[i].set_ylabel(labels[i])
+        axes[2].set_xlabel("time (seconds)")
+        fig.suptitle("Position over Time")
+        plt.show()
+
+        fig, axes = plt.subplots(4, 1, sharex=True, sharey=False, figsize=(10, 8))
+        labels = ["thrust_z_axis", "torque_x", "torque_y", "torque_z"]
+        for i in range(4):
+            axes[i].plot(times[1:], controls[:, i])
+            axes[i].set_ylabel(labels[i])
+        axes[2].set_xlabel("time (seconds)")
+        fig.suptitle("Control Effort over Time")
+        plt.show()
+
+        orientation_angles = []
+        for i in range(trajectory.shape[0]):
+            quat_ori = trajectory[i, 3:7]
+            rot = quat2rotm(quat_ori[[3, 0, 1, 2]])
+            euler = pin.rpy.matrixToRpy(np.matrix(rot))
+            orientation_angles.append(euler)
+        orientation_angles = np.array(orientation_angles)
+
+        fig, axes = plt.subplots(3, 1, sharex=True, sharey=True, figsize=(10, 8))
+        labels = ["x_orientation_radians", "y_orientation_radians", "z_orientation_radians"]
+        for i in range(3):
+            axes[i].plot(times, orientation_angles[:, i])
+            axes[i].set_ylabel(labels[i])
+        axes[2].set_xlabel("time (seconds)")
+        fig.suptitle("Orientation over Time")
+        plt.show()
+        
+
 
 if __name__ == "__main__":
     main()
