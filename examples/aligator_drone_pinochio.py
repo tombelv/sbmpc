@@ -19,8 +19,9 @@ from sbmpc.geometry import quat2rotm
 URDF_FILE_NAME_PATH = os.path.join(os.path.dirname(__file__), "crazyfly_urdf", "cf2x.urdf")
 
 SPHERE_CENTERS = np.array([[0, 1, 0.5],
-                           [0, 2, 0.5]])
-SPHERE_RADIUS = 0.3
+                           [0, 2, 0.5],
+                           [0.25, 0.25, 0.25]])
+SPHERE_RADIUS = 0.05
 MASS = 0.027
 GRAVITY = 9.81
 
@@ -103,29 +104,13 @@ nv = rmodel.nv
 ROT_NULL = np.eye(3)
 SPACE = manifolds.MultibodyPhaseSpace(rmodel)
 X_TARGET = SPACE.neutral()
-X_TARGET[:3] = (0, 3, 0.5)
+X_TARGET[:3] = (0.5, 0.5, 0.5)
+
 X0_INIT = np.concatenate([robot.q0, np.zeros(nv)])
 
-def setup(x0, u0, nu, weights, w_u, floor, ctrl_cstr, dt, dynmodel, quad_radius, nsteps) -> aligator.TrajOptProblem:
+def setup(x0, u0, nu, weights, w_u, term_weights, floor, ctrl_cstr, dt, dynmodel, quad_radius, nsteps) -> aligator.TrajOptProblem:
 
-    # def running_cost(self, state: jnp.array, inputs: jnp.array, reference) -> jnp.float32:
-    #     state_ref = reference[:13]
-    #     state_ref = state_ref.at[7:10].set(-1*(state[0:3] - state_ref[0:3]))
-    #     input_ref = reference[13:13+4]
-    #     pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, state_ref)
-    #     return (5 * vel_err.transpose() @ vel_err +
-    #             1 * ang_vel_err.transpose() @ ang_vel_err +
-    #             (inputs-input_ref).transpose() @ jnp.diag(jnp.array([10, 10, 10, 100])) @ (inputs-input_ref))
-
-    # def final_cost(self, state, reference):
-    #     pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, reference[:13])
-    #     return (10 * pos_err.transpose() @ pos_err +
-    #             1 * att_err.transpose() @ att_err +
-    #             5 * vel_err.transpose() @ vel_err +
-    #             1 * ang_vel_err.transpose() @ ang_vel_err)
-
-
-        term_cost = aligator.QuadraticStateCost(SPACE, nu, X_TARGET, np.diag(weights))
+        term_cost = aligator.QuadraticStateCost(SPACE, nu, X_TARGET, np.diag(term_weights)* dt)
         prob = aligator.TrajOptProblem(x0, nu, SPACE, term_cost=term_cost)
 
         for i in range(nsteps):
@@ -224,7 +209,7 @@ def main(display: bool = True, integrator: str = "euler"):
 
     ode_dynamics = aligator.dynamics.MultibodyFreeFwdDynamics(SPACE, QUAD_ACT_MATRIX)
 
-    dt = 0.01
+    dt = 0.02
     # 6 or 10 is interesting
     nsteps = 25
     Tf = nsteps * dt
@@ -242,10 +227,6 @@ def main(display: bool = True, integrator: str = "euler"):
     else:
         raise ValueError()
     
-
-    # solving dynamics, tau for position, velocity, rotation. solving direct dynamics.
-    # tau = pin.rnea(rmodel, rdata, robot.q0, np.zeros(nv), np.zeros(nv))
-    # u0, _, _, _ = np.linalg.lstsq(QUAD_ACT_MATRIX, tau, rcond=-1)
     u0 = np.zeros((nu,), dtype=np.float32)
     u0[0] = MASS * GRAVITY
 
@@ -258,10 +239,16 @@ def main(display: bool = True, integrator: str = "euler"):
     robot.visual_model.addGeometryObject(sp1_obj)
 
     weights = np.zeros(SPACE.ndx)
-    weights[:3] = 0.1
-    weights[3:6] = 1e-2
-    weights[nv:] = 1e-3
+    weights[:3] = 0
+    weights[3:7] = 1
+    weights[7:10] = 5
+    weights[10:13] = 1
 
+    term_weights = np.zeros(SPACE.ndx)
+    term_weights[:3] = 100
+    term_weights[3:7] = 1
+    term_weights[7:10] = 5
+    term_weights[10:13] = 1
 
     u_max = np.zeros(nu, dtype=np.float32)
     u_max[0] = 50
@@ -269,14 +256,14 @@ def main(display: bool = True, integrator: str = "euler"):
     u_min = np.zeros(nu, dtype=np.float32)
     u_min[1:4] = -np.pi * 2 * 10
 
-    w_u = np.eye(nu) * 1e-1
+    w_u = np.diag(np.array([10, 10, 10, 100]))
     floor = create_halfspace_z(SPACE.ndx, nu, 0.0, True)
 
     u_identity_fn = aligator.ControlErrorResidual(SPACE.ndx, np.zeros(nu))
     box_set = constraints.BoxConstraint(u_min, u_max)
     ctrl_cstr = (u_identity_fn, box_set)
 
-    problem = setup(X0_INIT, u0, nu, weights, w_u, floor, ctrl_cstr, dt, dynmodel, quad_radius, nsteps)
+    problem = setup(X0_INIT, u0, nu, weights, w_u, term_weights, floor, ctrl_cstr, dt, dynmodel, quad_radius, nsteps)
 
     tol = 1e-4
     mu_init = 1.0
@@ -333,25 +320,10 @@ def main(display: bool = True, integrator: str = "euler"):
         control_input = results.us.tolist()[0]
         controls.append(np.copy(control_input))
         dynmodel.forward(x0, control_input, dd)
-        # new_state = sim_dynamics_model.integrate(new_state, control_input, dt)
-        # x0 = np.concatenate(
-        #         [new_state.qpos, new_state.qvel])
-        # # re-ordering quaternion, pinocchio does x y z w, mjx does w x y z
-        # x0[3:7] = x0[[4, 5, 6, 3]]
-        # rot = quat2rotm(x0[3:7])
-        # euler = pin.rpy.matrixToRpy(np.matrix(rot))
-
         x0 = np.copy(dd.xnext)
 
         trajectory.append(x0)
-        
-        # res = pin.isNormalized(rmodel, x0)
-        # res = SPACE.isNormalized(x0)
-        # problem.replaceStageCircular(problem.stages[0])
-        # aligator.rotate_vec_left(problem.stages)
-        # solver.cycleProblem(problem, problem.stages[nsteps - 1].createData())
-
-        problem = setup(x0, u0, nu, weights, w_u, floor, ctrl_cstr, dt, dynmodel, quad_radius, nsteps)
+        problem = setup(x0, u0, nu, weights, w_u, term_weights, floor, ctrl_cstr, dt, dynmodel, quad_radius, nsteps)
         iter_counter += 1
         times.append(time.time() - start_time)
 
