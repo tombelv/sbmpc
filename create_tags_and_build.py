@@ -40,14 +40,14 @@ def write_new_version_to_file(tag_name: str):
         new_str = f"VERSION = '{tag_name}'"
         file_handle.write(new_str)
 
-def main(release_type):
+def main(release_type: str, tag_and_push: bool = False):
 
     if release_type not in SUPPORTED_RELEASE_TYPES:
         raise ValueError(f"release_type not supported, see list of supported types: {SUPPORTED_RELEASE_TYPES}")
 
     # first we check that we are on main or master, and warn users if not
     branch_name = get_git_branch()
-    if branch_name not in ["main", "master"]:
+    if tag_and_push and branch_name not in ["main", "master"]:
         raise ValueError("Must have master or main checked out to tag and build. Please verify you are on the right branch.")
     # # then we get the latest tag and increment it
     latest_tag = get_latest_git_tag()
@@ -60,28 +60,29 @@ def main(release_type):
         nums[i] = nums[i] + 1
         str_nums = [str(n) for n in nums]
         new_tag = ".".join(str_nums)
-    print("please enter an annotation for the new tag--a sentence or two about the new features or bugfixes since the last version. Press [enter] when done.")
-    annotation = input()
-    print(f"prior tag is {latest_tag}, new tag to create will be {new_tag}, annotation will be '{annotation}'. Is this correct (y/n)? Please verify before we push.")
-    correct_tag = input()
-    if correct_tag != "y":
-        raise RuntimeError
-    create_tag_with_annotation(new_tag, annotation)
+    if tag_and_push:
+        print("please enter an annotation for the new tag--a sentence or two about the new features or bugfixes since the last version. Press [enter] when done.")
+        annotation = input()
+        print(f"prior tag is {latest_tag}, new tag to create will be {new_tag}, annotation will be '{annotation}'. Is this correct (y/n)? Please verify before we push.")
+        correct_tag = input()
+        if correct_tag != "y":
+            raise RuntimeError
+        create_tag_with_annotation(new_tag, annotation)
+    else:
+        print(f"the tag we would have created would have been: {new_tag}, prior tag {latest_tag}")
     # our build tool looks to this file for the version number
     write_new_version_to_file(new_tag)
 
     # now that we've tagged, we can build the wheel file
     print("building wheel...")
     build_wheel()
-    
-        
-        
 
 
 if __name__ == "__main__":
-    
     parser = argparse.ArgumentParser()
     parser.add_argument("release_type", choices=SUPPORTED_RELEASE_TYPES,
                         help=f"which number in the version to increment, specified by choosing from {SUPPORTED_RELEASE_TYPES}")
+    parser.add_argument("-t", "--tag_and_push", help="This is for when we are ready for a release. If this flag is included a new git tag will be created incrementing the last tag and it will be pushed to the remote repository before building the wheel.",
+                        action="store_true")
     args = parser.parse_args()
-    main(args.release_type)
+    main(args.release_type, args.tag_and_push)
