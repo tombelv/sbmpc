@@ -1,0 +1,7 @@
+numpy
+matplotlib
+jax[cuda12]
+pinocchio
+scipy
+control
+mujoco-mjx
