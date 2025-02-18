@@ -7,7 +7,7 @@ authors = [
   { name="Chidinma Ezeji", email="" },
   { name="Michael Ziegltrum", email="mzandtheraspberrypi@gmail.com" },
 ]
-dynamic = ["version"]
+dynamic = ["version", "dependencies"]
 description = "A package to do sampling based trajectory control for robotic applications."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -23,8 +23,11 @@ Homepage = "https://github.com/tombelv/sbmpc"
 Issues = "https://github.com/tombelv/sbmpc/issues"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-requirements-txt"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
 path = "./version.txt"
+
+[tool.hatch.metadata.hooks.requirements_txt]
+files = ["requirements.txt"]
