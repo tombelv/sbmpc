@@ -1,7 +1,6 @@
 numpy
 matplotlib
-jax[cuda12]
-pinocchio
+jax
 scipy
 control
 mujoco-mjx

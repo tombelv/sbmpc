@@ -10,7 +10,7 @@ authors = [
 dynamic = ["version", "dependencies"]
 description = "A package to do sampling based trajectory control for robotic applications."
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
