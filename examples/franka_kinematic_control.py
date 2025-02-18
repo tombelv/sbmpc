@@ -47,7 +47,7 @@ class Simulation(Simulator):
     def __init__(self, initial_state, model, controller, num_iterations: int, visualize: bool = False):
         visualizer = None
         if visualize:
-            visualizer = construct_mj_visualizer_from_model(model, SCENE_PATH)
+            visualizer = construct_mj_visualizer_from_model(model, SCENE_PATH, 5000)
         super().__init__(initial_state, model, controller, num_iterations, visualizer)
 
     def run_kinematics(self):

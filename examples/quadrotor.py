@@ -66,6 +66,7 @@ def quadrotor_dynamics(state: jnp.array, inputs: jnp.array, params: jnp.array) -
                                  0.5 * quat_product(quat, ang_vel_quat),
                                  orientation_mat @ acc[:3],
                                  acc[3:6]])
+
     return state_dot
 
 
@@ -142,7 +143,7 @@ if __name__ == "__main__":
     sim = build_all(config, objective,
                     reference,
                     custom_dynamics_fn=quadrotor_dynamics,
-                    obstacles = False)
+                    obstacles=False)
 
     sim.simulate()
 
@@ -159,4 +160,5 @@ if __name__ == "__main__":
     plt.plot(time_vect[:-1], sim.input_traj)
     plt.legend(["F", "t_x", "t_y", "t_z"])
     plt.grid()
+
     plt.show()

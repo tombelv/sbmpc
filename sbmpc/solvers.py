@@ -137,9 +137,6 @@ class SamplingBasedMPC:
     def rollout_all(self, initial_state, reference, control_variables):
         return self.rollout_single(initial_state, reference, control_variables)
     
-    # def get_rollout_data(self, data: list):
-    #     # pass data to GP for training
-    #     return 
 
     def rollout_single(self, initial_state, reference, control_variables):
         cost = 0.0
@@ -156,21 +153,17 @@ class SamplingBasedMPC:
 
         # if self.config.MPC["augmented_reference"]:
         #     reference = reference.at[1:, -self.model.nu - 1:-1].set(control_variables)
-
-        constraint_violation = 0
-        for idx in range(self.horizon):
-            # We multiply the cost by the timestep to mimic a continuous time integration and make it work better when
-            # changing the timestep and time horizon jointly
+        
+        def cost_and_state_rollout(idx, cost_and_state):
+            cost, curr_state = cost_and_state
             cost += self.dt*self.cost_and_constraints(curr_state, control_variables[idx, :], reference[idx, :])
-            curr_state = self.model.integrate_rollout_single(curr_state[:self.model.nx], control_variables[idx, :], self.dt)
-            l1_dist = self.objective.constraints(curr_state, control_variables[idx, :], reference[idx, :])
-            constraint_violation += jnp.sum(l1_dist)
-            # rollout_states = rollout_states. at[idx+1, :].set(curr_state)
+            next_state = self.model.integrate_rollout_single(curr_state, control_variables[idx, :], self.dt)
+            
+            return cost, next_state
+
+        cost, _ = jax.lax.fori_loop(0, self.horizon, cost_and_state_rollout, (cost, curr_state), unroll=True)
 
         cost += self.dt*self.final_cost_and_constraints(curr_state, reference[self.horizon, :])
-        constraint_violation /= self.horizon  # average total l1 distance
-
-        # self.get_rollout_data([initial_state, control_variables, constraint_violation])
 
         return cost, control_variables
 
