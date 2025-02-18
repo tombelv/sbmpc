@@ -25,8 +25,8 @@ def get_latest_git_tag():
     return tag_name
 
 def create_tag_with_annotation(tag_name: str, annotation: str):
-    result = subprocess.run(['git', 'tag', tag_name, '-a', annotation], stdout=subprocess.PIPE, check=True)
-    result = subprocess.run(['git', 'push', 'origin', '--tags'], stdout=subprocess.PIPE, check=True)
+    result = subprocess.run(['git', 'tag', tag_name, '-m', annotation], stdout=subprocess.PIPE, check=True)
+    result = subprocess.run(['git', 'push', 'origin', tag_name], stdout=subprocess.PIPE, check=True)
 
 
 def build_wheel():
