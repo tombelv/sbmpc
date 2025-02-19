@@ -1,0 +1,37 @@
+[project]
+name = "sbmpc"
+authors = [
+  { name="Tommaso Belvedere", email="tommaso.belvedere@irisa.fr" },
+  { name="Giulio Turrisi", email="" },
+  { name="Valerio Modugno", email="v.modugno@ucl.ac.uk" },
+  { name="Chidinma Ezeji", email="" },
+  { name="Michael Ziegltrum", email="mzandtheraspberrypi@gmail.com" },
+]
+dynamic = ["version", "dependencies"]
+description = "A package to do sampling based trajectory control for robotic applications."
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+license = "MIT"
+license-files = ["LICEN[CS]E*"]
+
+[project.urls]
+Homepage = "https://github.com/tombelv/sbmpc"
+Issues = "https://github.com/tombelv/sbmpc/issues"
+
+[build-system]
+requires = ["hatchling", "hatch-requirements-txt"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "./version.txt"
+
+[tool.hatch.metadata.hooks.requirements_txt]
+files = ["requirements.txt"]
+
+[project.optional-dependencies]
+cuda12local = ["jax[cuda12_local]"]
+cuda12 = ["jax[cuda12]"]
