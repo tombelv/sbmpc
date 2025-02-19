@@ -115,11 +115,11 @@ if __name__ == "__main__":
     
     config = settings.Config(robot_config)
 
-    config.general.visualize = True
+    config.general.visualize = False
     config.MPC.dt = 0.02
     config.MPC.horizon = 25
     config.MPC.std_dev_mppi = 0.2*jnp.array([0.1, 0.1, 0.1, 0.05])
-    config.MPC.num_parallel_computations = 2000
+    config.MPC.num_parallel_computations = 1000
     config.MPC.initial_guess = INPUT_HOVER
     config.MPC.lambda_mpc = 50.0
     config.MPC.smoothing = "Spline"
@@ -127,7 +127,7 @@ if __name__ == "__main__":
     config.MPC.gains = False
 
     config.solver_dynamics = settings.DynamicsModel.CUSTOM
-    config.sim_dynamics = settings.DynamicsModel.MJX
+    config.sim_dynamics = settings.DynamicsModel.CUSTOM
 
     # x_init = jnp.concatenate([robot_config[settings.ROBOT_Q_INIT_KEY],
     #                  jnp.zeros(robot_config[settings.ROBOT_NV_KEY], dtype=jnp.float32)], axis=0)

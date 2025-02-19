@@ -8,7 +8,7 @@ from functools import partial
 
 from abc import ABC, abstractmethod
 
-from sbmpc.filter import cubic_spline_interpolation
+from sbmpc.filter import cubic_spline
 
 import json
 
@@ -110,6 +110,8 @@ class SamplingBasedMPC:
             self.last_inputs_window = jnp.tile(self.initial_guess, 1)
 
         self.last_input = self.initial_guess
+        
+        self.control_spline_grid = jnp.round(jnp.linspace(0, self.horizon, self.num_control_points)).astype(int).tolist()
 
         self.master_key = jax.random.PRNGKey(420)
         self.initial_random_parameters = jnp.zeros((self.num_parallel_computations, self.num_control_points, self.model.nu),
@@ -132,6 +134,9 @@ class SamplingBasedMPC:
 
     def clip_input_single(self, control_variables):
         return jnp.clip(control_variables, self.input_min_full_horizon, self.input_max_full_horizon)
+    
+    # def clip_input_samples(self, control_variables):
+    #     return jnp.clip(control_variables, self.input_min_full_horizon[self.control_spline_grid[1:], :], self.input_max_full_horizon[self.control_spline_grid[1:], :])
 
     @partial(jax.vmap, in_axes=(None, None, None, 0), out_axes=(0, 0))
     def rollout_all(self, initial_state, reference, control_variables):
@@ -144,7 +149,8 @@ class SamplingBasedMPC:
         # rollout_states = jnp.zeros((self.horizon+1, self.model.nx), dtype=self.dtype_general)
         # rollout_states = rollout_states.at[0, :].set(initial_state)
         if self.config.MPC.smoothing == "Spline":
-            control_interp = cubic_spline_interpolation(jnp.arange(0, self.horizon, self.control_points_sparsity),
+            # control_variables = self.clip_input_samples(control_variables)
+            control_interp = cubic_spline(self.control_spline_grid,
                                                         control_variables,
                                                         jnp.arange(0, self.horizon))
             control_variables = self.clip_input_single(control_interp)
@@ -182,7 +188,7 @@ class SamplingBasedMPC:
         curr_state = initial_state
         input_sequence = jnp.zeros((self.horizon, self.model.nu), dtype=self.dtype_general)
         if self.config.MPC["smoothing"] == "Spline":
-            control_interp = cubic_spline_interpolation(jnp.arange(0, self.horizon, self.control_points_sparsity),
+            control_interp = cubic_spline(jnp.arange(0, self.horizon, self.control_points_sparsity),
                                         control_variables,
                                         jnp.arange(0, self.horizon))
             control_variables = self.clip_input_single(control_interp)
@@ -205,7 +211,7 @@ class SamplingBasedMPC:
         additional_random_parameters = self.sample_input_sequence(key)
 
         if self.config.MPC.smoothing == "Spline":
-            control_vars_all = best_control_vars[::self.control_points_sparsity, :] + additional_random_parameters
+            control_vars_all = best_control_vars[self.control_spline_grid, :] + additional_random_parameters
         else:
             control_vars_all = best_control_vars + additional_random_parameters
 
