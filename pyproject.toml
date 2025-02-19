@@ -33,5 +33,5 @@ path = "./version.txt"
 files = ["requirements.txt"]
 
 [project.optional-dependencies]
-cuda12local = ["jax[cuda12_local]"]
-cuda12 = ["jax[cuda12]"]
+cuda12_local = ["jax[cuda12_local]<=0.4.35"]
+cuda12 = ["jax[cuda12]<=0.4.35"]
