@@ -1,0 +1,21 @@
+name: sbmpc_dev
+channels:
+- conda-forge
+- nvidia
+dependencies:
+- python<=3.12 # needed or we get python 3.13 and error when building mujoco RuntimeError: MUJOCO_PATH environment variable is not set
+- numpy
+- matplotlib
+- jaxlib=*=*cuda*
+- jax
+- cuda-nvcc 
+- pinocchio  
+- scipy 
+- compilers 
+- cmake 
+- pkg-config 
+- make 
+- ninja
+- control
+- pip:
+  - mujoco-mjx
