@@ -88,7 +88,8 @@ class MujocoVisualizer(Visualizer):
         expected_lookat_size = 3
         actual_size = len(lookat_point)
         if actual_size != expected_lookat_size:
-            raise ValueError(f"Invalid look at point. Size should be {expected_lookat_size}, {actual_size} given.")
+            raise ValueError("Invalid look at point. Size should be"
+                             f" {expected_lookat_size}, {actual_size} given.")
         self.viewer.cam.lookat = lookat_point
 
     def set_cam_distance(self, distance: float) -> None:
