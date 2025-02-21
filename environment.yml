@@ -3,10 +3,9 @@ channels:
 - conda-forge
 - nvidia
 dependencies:
-- python
+- python>=3.10
 - compilers 
 - cmake 
-- pkg-config 
 - make 
 - ninja
 
