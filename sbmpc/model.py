@@ -130,7 +130,7 @@ class Model(ModelParametric):
 
         self.nominal_parameters = nominal_parameters
 
-        self.integrate_rollout_single = jax.jit(self.integrate)
+        self.integrate_rollout_single = self.integrate
 
     def integrate(self, state, inputs, dt):
         return self.integrate_parametric(state, inputs, self.nominal_parameters, dt)

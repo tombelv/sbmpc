@@ -81,7 +81,7 @@ class Objective(BaseObjective):
 
         return pos_err, att_err, vel_err, ang_vel_err
 
-    def running_cost(self, state: jnp.array, inputs: jnp.array, reference) -> jnp.float32:
+    def running_cost(self, state: jnp.array, inputs: jnp.array, reference) -> jax.float32:
         state_ref = reference[:13]
         state_ref = state_ref.at[7:10].set(-1*(state[0:3] - state_ref[0:3]))
         input_ref = reference[13:13+4]

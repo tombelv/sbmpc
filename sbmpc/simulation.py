@@ -9,7 +9,7 @@ import logging
 import traceback
 from sbmpc.model import BaseModel, Model, ModelMjx
 import sbmpc.settings as settings
-from sbmpc.solvers import BaseObjective, SamplingBasedMPC
+from sbmpc.solvers import BaseObjective, SamplingBasedMPC, Controller
 from sbmpc.obstacle_loader import ObstacleLoader
 from typing import Callable, Tuple, Optional, Dict
 
@@ -128,11 +128,12 @@ def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str, num_it
 
 
 class Simulator(ABC):
-    def __init__(self, initial_state, model: BaseModel, controller, num_iter=100, visualizer: Optional[Visualizer] = None, obstacles:bool = True):
+    def __init__(self, initial_state, model: BaseModel, solver, num_iter=100, visualizer: Optional[Visualizer] = None, obstacles:bool = True):
         self.iter = 0
         self.current_state = initial_state
         self.model = model
-        self.controller = controller
+        self.controller = Controller(solver)
+        self.solver = solver
         self.num_iter = num_iter
         self.obstacles = obstacles
 
@@ -177,7 +178,7 @@ class Simulator(ABC):
                         if self.obstacles:
                             self.visualizer.move_obstacles(self.iter)
 
-                        time_until_next_step = self.controller.dt - \
+                        time_until_next_step = self.solver.dt - \
                             (time.time() - step_start)
                         if time_until_next_step > 0:
                             time.sleep(time_until_next_step)
@@ -213,14 +214,14 @@ class Simulation(Simulator):
     def update(self):
         # Compute the optimal input sequence
         time_start = time.time_ns()
-        input_sequence = self.controller.command(self.current_state_vec(), self.const_reference, num_steps=1).block_until_ready()
-        print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
+        input_sequence = self.controller.command(self.solver, self.current_state_vec(), self.const_reference, num_steps=1).block_until_ready()
         ctrl = input_sequence[0, :].block_until_ready()
+        print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
 
         self.input_traj[self.iter, :] = ctrl
 
         # Simulate the dynamics
-        self.current_state = self.model.integrate(self.current_state, ctrl, self.controller.dt)
+        self.current_state = self.model.integrate(self.current_state, ctrl, self.solver.dt)
         self.state_traj[self.iter + 1,  :] = self.current_state_vec() #[:self.model.nx] # set only qpos and qvel
 
 
@@ -288,13 +289,15 @@ def build_all(config: settings.Config, objective: BaseObjective,
 
     solver = SamplingBasedMPC(solver_dynamics_model, objective, config)
     
-    # dummy for jitting
-    input_sequence = solver.command(solver_x_init, reference, False).block_until_ready()
     visualize = config.general.visualize
     visualizer_params = {ROBOT_SCENE_PATH_KEY: config.robot.robot_scene_path}
 
     # Setup and run the simulation
     num_iterations = config.sim_iterations
     sim = Simulation(sim_state_init, sim_dynamics_model, solver, reference, num_iterations, visualize, visualizer_params, obstacles)
+    
+    # dummy for jitting
+    input_sequence = sim.controller.command(sim.solver, solver_x_init, reference, False).block_until_ready()
+    
     return sim
 

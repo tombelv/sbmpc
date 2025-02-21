@@ -10,7 +10,6 @@ from abc import ABC, abstractmethod
 
 from sbmpc.filter import cubic_spline
 
-import json
 
 
 class BaseObjective(ABC):
@@ -31,8 +30,7 @@ class BaseObjective(ABC):
         return self.final_cost(state, reference) + jnp.sum(self.make_barrier(self.terminal_constraints(state, reference)))
 
     def make_barrier(self, constraint_array):
-        # constraint_array = jnp.where(constraint_array > 0, 1e5, 0.0)  
-        constraint_array = jnp.where(constraint_array > 0, 5, 0.0)
+        constraint_array = jnp.where(constraint_array > 0, 1e3, 0.0)
         return constraint_array
 
     def constraints(self, state, inputs, reference):
@@ -42,10 +40,21 @@ class BaseObjective(ABC):
         return 0.0
 
 
+@jax.jit
+def _shift_guess(best_control_vars):
+        best_control_vars_shifted = jnp.roll(best_control_vars, shift=-1, axis=0)
+        best_control_vars_shifted = best_control_vars_shifted.at[-1, :].set(
+            best_control_vars_shifted[-2:-1, :].reshape(-1))
 
-class SamplingBasedMPC:
+        return best_control_vars_shifted
+
+
+class SamplingBasedMPC():
     """
     Sampling-based MPC solver.
+    
+    This solver is static (apart from the master_key)
+    
     """
     def __init__(self, model: BaseModel, objective: BaseObjective, config: Config):
         """
@@ -102,14 +111,6 @@ class SamplingBasedMPC:
         else:
             self.initial_guess = config.MPC.initial_guess
             self.best_control_vars = jnp.tile(self.initial_guess, (self.horizon, 1))
-
-        self.filter = config.MPC.filter
-        if self.filter is not None:
-            self.last_inputs_window = jnp.tile(self.initial_guess, self.filter.window_size//2)
-        else:
-            self.last_inputs_window = jnp.tile(self.initial_guess, 1)
-
-        self.last_input = self.initial_guess
         
         self.control_spline_grid = jnp.round(jnp.linspace(0, self.horizon, self.num_control_points)).astype(int).tolist()
 
@@ -127,7 +128,10 @@ class SamplingBasedMPC:
         # Rename functions for cost during rollout
         self.cost_and_constraints = self.objective.cost_and_constraints
         self.final_cost_and_constraints = self.objective.final_cost_and_constraints
+        
+        
 
+    
     @partial(jax.vmap, in_axes=(None, 0), out_axes=0)
     def clip_input(self, control_variables):
         return jnp.clip(control_variables, self.input_min_full_horizon, self.input_max_full_horizon)
@@ -142,8 +146,8 @@ class SamplingBasedMPC:
     def rollout_all(self, initial_state, reference, control_variables):
         return self.rollout_single(initial_state, reference, control_variables)
     
-
     def rollout_single(self, initial_state, reference, control_variables):
+        
         cost = 0.0
         curr_state = initial_state
         # rollout_states = jnp.zeros((self.horizon+1, self.model.nx), dtype=self.dtype_general)
@@ -167,9 +171,9 @@ class SamplingBasedMPC:
             
             return cost, next_state
 
-        cost, _ = jax.lax.fori_loop(0, self.horizon, cost_and_state_rollout, (cost, curr_state), unroll=True)
+        cost, final_state = jax.lax.fori_loop(0, self.horizon, cost_and_state_rollout, (cost, curr_state))
 
-        cost += self.dt*self.final_cost_and_constraints(curr_state, reference[self.horizon, :])
+        cost += self.dt*self.final_cost_and_constraints(final_state, reference[self.horizon, :])
 
         return cost, control_variables
 
@@ -224,7 +228,7 @@ class SamplingBasedMPC:
             else:
                 costs, control_vars_all = self.rollout_all(state, reference, control_vars_all)
 
-        additional_random_parameters_clipped = control_vars_all - best_control_vars
+        additional_random_parameters_clipped = (control_vars_all - best_control_vars)
 
         # Compute MPPI update
         costs, best_cost, worst_cost = self._sort_and_clip_costs(costs)
@@ -237,56 +241,12 @@ class SamplingBasedMPC:
             weights_grad_shift = jnp.sum(weights[:, jnp.newaxis] * gradients, axis=0)
             weights_grad = -self.lam * weights[:, jnp.newaxis] * (gradients - weights_grad_shift)
             gains = jnp.sum(jnp.einsum('bi,bo->bio', weights_grad, additional_random_parameters_clipped[:, 0, :]), axis=0).T
-        else:
-            gains = jnp.zeros_like(self.gains)
 
         weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * additional_random_parameters_clipped
         optimal_action = best_control_vars + jnp.sum(weighted_inputs, axis=0)
 
         return optimal_action, gains
 
-    def command(self, state, reference, shift_guess=True, num_steps=1):
-        """
-        This function computes the control action by applying MPPI.
-        Parameters
-        ----------
-        state : jnp.array
-            The current state of the robot for feedback
-        reference
-            The desired state of the robot or reference trajectory (dim: horizon x nx)
-        shift_guess : bool (default = True)
-            Determines if the resulting control action is stored in a shifted version of the control variables
-        num_steps : int
-            How many steps of optimization to make before returning the solution
-        Returns
-        -------
-        optimal_action : jnp.array
-            The optimal input trajectory shaped (horizon, nu)
-        """
-        # If the reference is just a state, repeat it along the horizon
-        if reference.ndim == 1:
-            reference = jnp.tile(reference, (self.horizon+1, 1))
-        # if self.config.MPC["augmented_reference"]:
-        #     reference = jnp.concatenate((reference, jnp.tile(self.last_input, (self.horizon+1, 1)), jnp.arange(0, self.horizon+1, 1).reshape(self.horizon+1, 1)), axis=1)
-
-        best_control_vars = self.best_control_vars
-        # maybe this loop should be jitted to actually be more efficient
-        for i in range(num_steps):
-            best_control_vars, gains = self.compute_control_mppi(state, reference, best_control_vars,
-                                                                self.master_key, self.gains)
-            self.gains = gains
-            # Below are the gains computed using the full jax autodiff instead of the more efficient formula
-            # print("old gains", self.ctrl_sens_to_state(state, reference, best_control_vars, self.master_key, self.gains)[0][0])
-            self._update_key()
-
-        self.last_input = best_control_vars[0]
-
-        if shift_guess:
-            self.best_control_vars = self._shift_guess(best_control_vars)
-        else:
-            self.best_control_vars = best_control_vars
-        
-        return best_control_vars
 
     def _sort_and_clip_costs(self, costs):
         # Saturate the cost in case of NaN or inf
@@ -320,14 +280,7 @@ class SamplingBasedMPC:
     def _update_key(self):
         newkey, subkey = jax.random.split(self.master_key)
         self.master_key = newkey
-
-    @partial(jax.jit, static_argnums=(0,), device=jax.devices("cpu")[0])
-    def _shift_guess(self, best_control_vars):
-        best_control_vars_shifted = jnp.roll(best_control_vars, shift=-1, axis=0)
-        best_control_vars_shifted = best_control_vars_shifted.at[-1, :].set(
-            best_control_vars_shifted[-2:-1, :].reshape(-1))
-
-        return best_control_vars_shifted
+    
 
     def sample_input_sequence(self, key):
         # Generate random parameters
@@ -341,3 +294,39 @@ class SamplingBasedMPC:
 
         return additional_random_parameters
     
+
+
+class Controller:
+    """
+    Stateful controller calling the solver function and updating the its memory.
+    
+    This is needed to avoid triggering recompilation of the solver function at each iteration.
+    """
+    def __init__(self, solver):
+        
+        self.last_input = solver.initial_guess
+        self.gains = solver.gains
+        self.best_control_vars = solver.best_control_vars        
+        
+    def command(self, solver, state, reference, shift_guess=True, num_steps=1):
+        
+        # If the reference is just a state, repeat it along the horizon
+        if reference.ndim == 1:
+            reference = jnp.tile(reference, (solver.horizon+1, 1))
+
+        best_control_vars = self.best_control_vars
+        # maybe this loop should be jitted to actually be more efficient
+        for i in range(num_steps):
+            best_control_vars, gains = solver.compute_control_mppi(state, reference, best_control_vars,
+                                                                solver.master_key, self.gains)
+            self.gains = gains
+            solver._update_key()
+
+        self.last_input = best_control_vars[0]
+
+        if shift_guess:
+            self.best_control_vars = _shift_guess(best_control_vars)
+        else:
+            self.best_control_vars = best_control_vars
+        
+        return best_control_vars   
