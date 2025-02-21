@@ -1,6 +1,6 @@
 numpy
 matplotlib
-jax<=0.4.35
+jax
 scipy
 control
 mujoco-mjx

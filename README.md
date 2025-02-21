@@ -12,6 +12,22 @@ Create the conda environment with
 mamba env create -f environment.yml
 ```
 
+
+Activate the environment with
+```
+conda activate sbmpc
+```
+
+Depending on the CUDA settings of your machine, choose between
+```
+pip install -e .
+
+pip install -e ".[cuda12]"
+
+pip install -e ".[cuda12_local]"
+
+```
+
 # TODO
 - [x] Control parametrization (splines etc)
 - [x] Multivariate gaussian sampling 
