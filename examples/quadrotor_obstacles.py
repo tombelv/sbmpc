@@ -31,6 +31,7 @@ SPATIAL_INTERTIA_MAT = jnp.diag(jnp.concatenate([MASS*jnp.ones(3, dtype=jnp.floa
 SPATIAL_INTERTIA_MAT_INV = jnp.linalg.inv(SPATIAL_INTERTIA_MAT)
 
 INPUT_HOVER = jnp.array([MASS*GRAVITY, 0., 0., 0.], dtype=jnp.float32)
+obsl = ObstacleLoader()
 
 @jax.jit
 def quadrotor_dynamics(state: jnp.array, inputs: jnp.array, params: jnp.array) -> jnp.array:
@@ -113,7 +114,6 @@ class Objective(BaseObjective):
 
 
 if __name__ == "__main__":
-    obsl = ObstacleLoader()
     obsl.create_obstacles()
     obsl.load_obstacles()
 
@@ -156,6 +156,7 @@ if __name__ == "__main__":
     reference = jnp.concatenate((x_des, INPUT_HOVER))  
     reference = jnp.tile(reference, (horizon, 1))
     reference = jnp.concatenate([reference, traj],axis=1)
+    # print(reference.shape)
 
     objective = Objective()
 
@@ -164,7 +165,6 @@ if __name__ == "__main__":
                     custom_dynamics_fn=quadrotor_dynamics)
 
     sim.simulate() 
-
     obsl.reset_xmls()
  
     time_vect = config.MPC.dt*jnp.arange(sim.state_traj.shape[0])

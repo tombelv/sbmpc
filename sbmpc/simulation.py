@@ -13,7 +13,6 @@ from sbmpc.solvers import BaseObjective, SamplingBasedMPC
 from sbmpc.obstacle_loader import ObstacleLoader
 from typing import Callable, Tuple, Optional, Dict
 
-
 class Visualizer(ABC):
     def __init__(self):
         self.paused = False
@@ -220,7 +219,6 @@ class Simulation(Simulator):
 
         # Simulate the dynamics
         self.current_state = self.model.integrate(self.current_state, ctrl, self.controller.dt)
-        print(self.current_state) 
         self.state_traj[self.iter + 1,  :] = self.current_state_vec() #[:self.model.nx] # set only qpos and qvel
 
 
@@ -287,7 +285,7 @@ def build_all(config: settings.Config, objective: BaseObjective,
         raise NotImplementedError
 
     solver = SamplingBasedMPC(solver_dynamics_model, objective, config)
-    
+
     # dummy for jitting
     input_sequence = solver.command(solver_x_init, reference, False).block_until_ready()
     visualize = config.general.visualize
@@ -299,7 +297,7 @@ def build_all(config: settings.Config, objective: BaseObjective,
     return sim
 
 
-class BG_Simulator(Simulator):  # background simulator for generating rollouts 
+class BgSimulator(Simulator):  # background simulator for generating rollouts 
     def __init__(self, initial_state, model, controller, reference, num_iter=100, visualizer = None, obstacles = True):
         super().__init__(initial_state, model, controller, num_iter, visualizer, obstacles)
         self.reference = reference

@@ -5,14 +5,8 @@ import jax.numpy as jnp
 import jax
 
 from functools import partial
-
 from abc import ABC, abstractmethod
-
 from sbmpc.filter import cubic_spline_interpolation
-
-import json
-
-import numpy as np
 
 class BaseObjective(ABC):
     def __init__(self, robot_model=None):
@@ -41,7 +35,6 @@ class BaseObjective(ABC):
 
     def terminal_constraints(self, state, reference):
         return 0.0
-
 
 
 class SamplingBasedMPC:
@@ -237,10 +230,22 @@ class SamplingBasedMPC:
         optimal_action = best_control_vars + jnp.sum(weighted_inputs, axis=0)
 
         return optimal_action, gains
-    
+
+    def compute_control_gp(self, state, reference, best_control_vars,):
+        optimal_action = None
+
+        '''
+        Want to sample from gp distribution (instead of randomly) before computing rollouts -> see ~386 and 398!
+        Still want to sort and clip costs, compute weights, etc.
+        Need to compute gains..?
+        '''
+       
+        return optimal_action
+
 
     @partial(jax.vmap, in_axes=(None, None, None, 0), out_axes=(0, 0, 0, 0))
     def get_rollout(self, initial_state, reference, control_variables):
+        lambda_ = 1
         cost = 0.0
         curr_state = initial_state
         if self.config.MPC.smoothing == "Spline":
@@ -257,17 +262,16 @@ class SamplingBasedMPC:
             cost += self.dt*self.cost_and_constraints(curr_state, control_variables[idx, :], reference[idx, :])
             curr_state = self.model.integrate_rollout_single(curr_state[:self.model.nx], control_variables[idx, :], self.dt)
             final_state = curr_state
-            l1_dist = self.objective.constraints(curr_state, control_variables[idx, :], reference[idx, :])
+            l1_dist = jnp.abs(self.objective.constraints(curr_state, control_variables[idx, :], reference[idx, :])) # want the distance from obs to be >= lambda
             constraint_violation += jnp.sum(l1_dist)
         constraint_violation /= self.horizon
         cost += self.dt*self.final_cost_and_constraints(curr_state, reference[self.horizon, :])
-
         return cost, control_variables, initial_state, constraint_violation
-    
+ 
     def get_rollouts(self, state, reference, num_steps=1):
         if reference.ndim == 1:
             reference = jnp.tile(reference, (self.horizon+1, 1))
-  
+
         best_control_vars = self.best_control_vars
         rollouts = []
         for i in range(num_steps):
@@ -279,7 +283,9 @@ class SamplingBasedMPC:
                 control_vars_all = best_control_vars + additional_random_parameters
 
             costs, control_vars_all, inital_state, constraint_violation = self.get_rollout(state, reference, control_vars_all)
+            # print(constraint_violation)
             rollouts.append([inital_state, control_vars_all, constraint_violation])
+
             additional_random_parameters_clipped = control_vars_all - best_control_vars
             costs, best_cost, worst_cost = self._sort_and_clip_costs(costs)
             exp_costs = self._exp_costs_shifted(costs, best_cost)
@@ -291,7 +297,6 @@ class SamplingBasedMPC:
       
         self.best_control_vars = self._shift_guess(optimal_action)
     
-
         return rollouts, best_control_vars
 
     def command(self, state, reference, shift_guess=True, num_steps=1):
@@ -337,7 +342,6 @@ class SamplingBasedMPC:
         
         return best_control_vars
     
-
     def _sort_and_clip_costs(self, costs):
         # Saturate the cost in case of NaN or inf
         costs = jnp.where(jnp.isnan(costs), 1e6, costs)
@@ -390,4 +394,5 @@ class SamplingBasedMPC:
             sampled_variation_all)
 
         return additional_random_parameters
+    
     
