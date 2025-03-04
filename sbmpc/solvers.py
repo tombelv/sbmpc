@@ -213,7 +213,7 @@ class SamplingBasedMPC():
 
     def _compute_control_mppi(self, state, reference, best_control_vars, key, gains):
         additional_random_parameters = self.sample_input_sequence(key)
-
+        
         if self.config.MPC.smoothing == "Spline":
             control_vars_all = best_control_vars[self.control_spline_grid, :] + additional_random_parameters
         else:
@@ -229,6 +229,8 @@ class SamplingBasedMPC():
                 costs, control_vars_all = self.rollout_all(state, reference, control_vars_all)
 
         additional_random_parameters_clipped = (control_vars_all - best_control_vars)
+
+        self.sampler.Update(costs,control_vars_all)
 
         # Compute MPPI update
         costs, best_cost, worst_cost = self._sort_and_clip_costs(costs)
