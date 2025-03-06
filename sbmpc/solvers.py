@@ -230,9 +230,20 @@ class SamplingBasedMPC():
 
         additional_random_parameters_clipped = (control_vars_all - sampler.best_control_vars)
 
-        sampler.Update(costs,control_vars_all)
 
+        # Compute update for weights
+        costs, best_cost, worst_cost = self._sort_and_clip_costs(costs)
+        # exp_costs = self._exp_costs_invariant(costs, best_cost, worst_cost)
+        exp_costs = self._exp_costs_shifted(costs, best_cost)
+
+
+        # udapting the sampling
+        optimal_action = sampler.Update(costs,control_vars_all)
+        
+
+        # I'll keep the computation of the gains separated (following chat with tommy)
         if self.compute_gains:
+            exp_costs = self._exp_costs_shifted(costs, best_cost)
             denom = jnp.sum(exp_costs)
             weights = exp_costs / denom
             weights_grad_shift = jnp.sum(weights[:, jnp.newaxis] * gradients, axis=0)

@@ -43,7 +43,7 @@ class CEMSampler(SBS):
         pass
 
     def Update(self,parameters, costs):
-
+        pass
 
 class MPPISampler(SBS):
 
@@ -51,26 +51,24 @@ class MPPISampler(SBS):
         super.__init()
 
     def sample_input_sequence(self, key):
-        pass
+        # Generate random parameters
+        # The first control parameters is the old best one, so we add zero noise there
+        additional_random_parameters = self.initial_random_parameters * 0.0
+        # One sample is kept equal to the guess
+        sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model.nu)) * self.std_dev
 
-    def Update(self,parameters, costs):
-        # Compute MPPI update
-        costs, best_cost, worst_cost = self._sort_and_clip_costs(costs)
-        # exp_costs = self._exp_costs_invariant(costs, best_cost, worst_cost)
-        exp_costs = self._exp_costs_shifted(costs, best_cost)
+        additional_random_parameters = additional_random_parameters.at[1:, :, :].set(
+            sampled_variation_all)
 
+    def Update(self,parameters, costs, exp_costs):
         denom = jnp.sum(exp_costs)
         weights = exp_costs / denom
+
+    def _exp_costs_shifted(self, costs, best_cost):
+        return jnp.exp(- self.lam * (costs - best_cost))
+
         
 
-        weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * additional_random_parameters_clipped
-        optimal_action = self.best_control_vars + jnp.sum(weighted_inputs, axis=0)
-
-    def _sort_and_clip_costs(cost):
-        pass
-
-    def _exp_costs_shifted(cost,best_cost):
-        pass
-
+  
 
 
