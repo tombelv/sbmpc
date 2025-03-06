@@ -211,13 +211,13 @@ class SamplingBasedMPC():
 
         return cost, input_sequence
 
-    def _compute_control_mppi(self, state, reference, best_control_vars, key, gains):
-        additional_random_parameters = self.sample_input_sequence(key)
+    def _compute_control_mppi(self, state, reference, sampler, key, gains):
+        additional_random_parameters = sampler.sample_input_sequence(key)
         
         if self.config.MPC.smoothing == "Spline":
-            control_vars_all = best_control_vars[self.control_spline_grid, :] + additional_random_parameters
+            control_vars_all = sampler.best_control_vars[self.control_spline_grid, :] + additional_random_parameters
         else:
-            control_vars_all = best_control_vars + additional_random_parameters
+            control_vars_all = sampler.best_control_vars + additional_random_parameters
 
         # Do rollout
         if self.config.MPC.sensitivity:
@@ -228,24 +228,16 @@ class SamplingBasedMPC():
             else:
                 costs, control_vars_all = self.rollout_all(state, reference, control_vars_all)
 
-        additional_random_parameters_clipped = (control_vars_all - best_control_vars)
+        additional_random_parameters_clipped = (control_vars_all - sampler.best_control_vars)
 
-        self.sampler.Update(costs,control_vars_all)
+        sampler.Update(costs,control_vars_all)
 
-        # Compute MPPI update
-        costs, best_cost, worst_cost = self._sort_and_clip_costs(costs)
-        # exp_costs = self._exp_costs_invariant(costs, best_cost, worst_cost)
-        exp_costs = self._exp_costs_shifted(costs, best_cost)
-
-        denom = jnp.sum(exp_costs)
-        weights = exp_costs / denom
         if self.compute_gains:
+            denom = jnp.sum(exp_costs)
+            weights = exp_costs / denom
             weights_grad_shift = jnp.sum(weights[:, jnp.newaxis] * gradients, axis=0)
             weights_grad = -self.lam * weights[:, jnp.newaxis] * (gradients - weights_grad_shift)
             gains = jnp.sum(jnp.einsum('bi,bo->bio', weights_grad, additional_random_parameters_clipped[:, 0, :]), axis=0).T
-
-        weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * additional_random_parameters_clipped
-        optimal_action = best_control_vars + jnp.sum(weighted_inputs, axis=0)
 
         return optimal_action, gains
 
