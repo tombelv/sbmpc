@@ -106,8 +106,26 @@ class Objective(BaseObjective):
         n_obs = len(reference[17:])//3
         obs_pos = jnp.reshape(reference[17:],(n_obs,3))
         dist_from_obs = jnp.array([jnp.sum(abs(pos - obs) - r) for obs in obs_pos])  # l1 dist 
-        # dist_from_obs = [jnp.where(jnp.sum(dist) < 0, jnp.positive(dist), jnp.negative(dist)) for dist in dist_from_obs]  # penalise only if x,y and z are in range
-        return dist_from_obs * -1
+        # dist_from_obs = jnp.array([(abs(pos - obs) - r) for obs in obs_pos]) 
+        return dist_from_obs 
+    
+    def constraints_not_jit(self, state, inputs, reference):
+        r = obsl.radius + 0.1                                           
+        pos = state[0:3]
+        n_obs = len(reference[17:])//3
+        obs_pos = jnp.reshape(reference[17:],(n_obs,3))
+
+        dist_from_obs = jnp.array([(abs(pos - obs) - r) for obs in obs_pos]) 
+
+        def too_close(dist): # penalise only if x,y and z are in range
+            if all(x < 0 for x in dist):
+                return -1
+            else:
+                return 1
+            
+        dist_from_obs = [too_close(dist) for dist in dist_from_obs]
+
+        return dist_from_obs 
 
     # def constraints(self, state, inputs, reference):
     #     return jnp.array([state[0] - 0.3, state[1] - 0.4])

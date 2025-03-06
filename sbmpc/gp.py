@@ -5,7 +5,6 @@ import gpjax as gpx
 import sbmpc.settings as settings
 import numpy as np
 import pandas as pd
-# import hmc  # TODO import manually ... pip installed version not correct
 import time
 import httpimport
 
@@ -21,7 +20,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import DotProduct, WhiteKernel
 
-from jax.scipy.stats import norm
+from jax.scipy.stats import norm, multivariate_normal
 
 with httpimport.github_repo('martin-marek', 'mini-hmc-jax', ref='master'):
   import hmc
@@ -29,30 +28,45 @@ with httpimport.github_repo('martin-marek', 'mini-hmc-jax', ref='master'):
 MASS = 0.027
 GRAVITY = 9.81
 INPUT_HOVER = jnp.array([MASS*GRAVITY, 0., 0., 0.], dtype=jnp.float32)
+
 obsl = ObstacleLoader()
-num_steps = 10
+num_steps = 100
+sim_iters = 500
+horizon = 25
 
 class DataSet():
+
     def __init__(self):
         pass
 
     def create(self, num_samples, make_new=False):  # num_steps = number of steps to simulate, num_samples - number of parallel computations to take from each step
-        samples = None
+        all_samples = None
+        total_samples = num_steps*num_samples
+        
         if make_new:
-            samples = self.get_quadrotor_rollouts(num_samples) # ((num_samples * num_steps), 114)
-            samples[:,-1] = np.abs(samples[:,-1]) # constraints term should be absolute TODO - check this in solvers
-            np.savetxt("/home/ubuntu/sbmpc/sbmpc/quadrotor_rollouts.data", samples, fmt='%4.6f', delimiter=' ')
-             
-        else: 
-            samples = pd.read_csv("/home/ubuntu/sbmpc/sbmpc/quadrotor_rollouts.data", header=None, delimiter=' ').values[:num_samples*num_steps]
+            trajs = ["circle", "diagonal", "sine"]
+            ratios = [0.4,0.4,0.2]
+            obs_trajs = [obsl.get_obstacle_trajectory(sim_iters,traj)[:horizon+1] for traj in trajs] 
+            
+            samples = []
+            for i in range(3):
+                traj_samples = self.get_quadrotor_rollouts(num_samples, obs_trajs[i])
+                np.random.shuffle(traj_samples)
+                samples.append(traj_samples[:int(total_samples*ratios[i])]) 
+            all_samples = np.concatenate(samples) 
 
-        print(f"Samples shape => {samples.shape}")
-        X = samples[:, :-1]  
-        y = samples[:, -1].reshape(-1, 1)
+            np.savetxt("/home/ubuntu/sbmpc/sbmpc/quadrotor_rollouts.data", all_samples, fmt='%4.6f', delimiter=' ')     
+        else: 
+            all_samples = pd.read_csv("/home/ubuntu/sbmpc/sbmpc/quadrotor_rollouts.data", header=None, delimiter=' ').values[:total_samples]
+
+        print(f"Created {all_samples.shape[0]} samples with {all_samples.shape[1]} dimensions") # ((num_samples * num_steps), 114)
+
+        X = all_samples[:, :-1]  
+        y = all_samples[:, -1].reshape(-1, 1)
 
         return X , y
   
-    def get_quadrotor_rollouts(self, num_samples): 
+    def get_quadrotor_rollouts(self, num_samples, traj): 
         robot_config = settings.RobotConfig() # run simulation as usual
         robot_config.robot_scene_path = "examples/bitcraze_crazyflie_2/scene.xml"
         robot_config.nq = 7
@@ -81,7 +95,6 @@ class DataSet():
         x_des = jnp.concatenate([q_des, jnp.zeros(robot_config.nv, dtype=jnp.float32)], axis=0)
 
         horizon = config.MPC.horizon+1
-        traj = obsl.get_obstacle_trajectory(config.sim_iterations,"circle")[:horizon]   # TODO - include diagonal (and sine?)
 
         reference = jnp.concatenate((x_des, INPUT_HOVER))  
         reference = jnp.tile(reference, (horizon, 1))
@@ -91,17 +104,16 @@ class DataSet():
 
         rows = num_samples*num_steps
         initial_states_all = np.zeros((rows,13))  
-        # control_vars_all = np.zeros((rows,100))
-        control_vars_all = np.zeros((rows,25))
+        control_vars_all = np.zeros((rows,100))
+        # control_vars_all = np.zeros((rows,25))
         constraint_violation_all = np.zeros((rows,1))
 
-        lambda_ = 0.5
         for i in range(num_steps): # take first 100 rollouts for each state (currently 100 states) 
             initial_states, control_vars, constraint_violation = bg_sim.run()[0] # returns 2000 parallel rollouts for given state
 
             initial_states = np.array(initial_states)[:num_samples]
             # control_vars = np.reshape(control_vars[:,:,0],(2000,25,1))
-            control_vars = control_vars[:,:,0]
+            # control_vars = control_vars[:,:,0]
             control_vars = np.reshape(control_vars,(control_vars.shape[0],-1))[:num_samples] 
             constraint_violation = np.reshape(constraint_violation,(constraint_violation.shape[0], 1))[:num_samples]
            
@@ -141,10 +153,10 @@ class DataSet():
         solver = SamplingBasedMPC(solver_dynamics_model, quad_obj, config)
         sim = BgSimulator(sim_state_init, sim_dynamics_model, solver, reference, num_iter=100, visualizer = None, obstacles = True)
 
-        return sim
-                
+        return sim               
 
 class GaussianProcessSampling(): 
+
     def __init__(self):
         self.key = jax.random.key(456)
         self.ds = DataSet()
@@ -159,12 +171,14 @@ class GaussianProcessSampling():
        
         # self.mppi_gauss = (jax.random.normal(key=self.key, shape=shape) + self.mean) * self.stddev
         self.mppi_gauss = (jax.random.normal(key=self.key, shape=shape) + self.mean) 
-        self.flat_mppi_gauss = jax.random.normal(key=self.key, shape=(self.n_samples,38)) + self.mean
+        self.flat_mppi_gauss = jax.random.normal(key=self.key, shape=(self.n_samples,113)) + self.mean
         self.target_mean = 0
         self.target_stddev = 1
+
+        self.delta = 1 # or think in terms of  1 - delta -> see paper (constraint violation between 0 and n_obstacles)
           
     def run(self):
-        X, y = self.ds.create(num_samples=50)
+        X, y = self.ds.create(num_samples=10)
         
         Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=0.3, random_state=42)
 
@@ -198,32 +212,32 @@ class GaussianProcessSampling():
     
         opt_posterior, history = gpx.fit_scipy(
         model=posterior,
-        objective=lambda p, d: -gpx.objectives.conjugate_loocv(p,d),   # vs conjugate mll 
+        objective=lambda p, d: -gpx.objectives.conjugate_mll(p,d),   # vs conjugate loovc and others
         train_data=self.training_set,
         ) 
-        # print(history)
+        print(history)
 
-        mock_X = jax.random.normal(key=self.key, shape= (self.n_samples,38)) # flat_mppi_gauss
+        mock_X = jax.random.normal(key=self.key, shape= (self.n_samples,113)) # flat_mppi_gauss
         mock_Y = jax.random.normal(key=self.key, shape = (self.n_samples,)) # mock contraint terms for the input - will compute in solvers when integrated
         
-        P = self.get_gp_P(opt_posterior, self.training_set, mock_X, mock_Y) 
+        P = self.get_gp_prob(opt_posterior, self.training_set, mock_X, mock_Y) 
         target_dist = self.mppi_gauss * P
 
         self.target_mean = jnp.mean(target_dist)
         self.target_stddev = jnp.std(target_dist)
 
-    def get_gp_P(self, opt_posterior, training_set, X, Y):
+    def get_gp_prob(self, opt_posterior, training_set, X, Y):
         latent_dist = opt_posterior.predict(X, train_data=training_set) # get GP prediction for X (Y)
-        predictive_dist = opt_posterior.likelihood(latent_dist) # determine how likely these samples are to fit original Gp
-        
-        mean = predictive_dist.mean()
-        stddev = predictive_dist.stddev()
-        P = norm.pdf(Y-3, loc=mean, scale=stddev) # calc pdf for samples based on predictive mean and stddev
+        mean = latent_dist.mean()
+        stddev = latent_dist.stddev()
+
+        P = norm.cdf(self.delta, loc=mean, scale=stddev) # calc cdf for samples based on predictive mean and stddev, below a set threshold
+        # print(P)
 
         return np.reshape(P,(self.n_samples,1,1))
         
     def target_pdf(self, params): 
-        return jax.scipy.stats.multivariate_normal.logpdf(x=params, mean=self.target_mean, cov=self.target_stddev).sum()  # TODO - compare performance with pdf vs log pdf
+        return jax.scipy.stats.multivariate_normal.LOGpdf(x=params, mean=self.target_mean, cov=self.target_stddev).sum()  # TODO - compare performance with pdf vs log pdf
  
     def hmc(self):
         params_init = jnp.zeros((5,4))  # determines the sample shape..?
@@ -232,7 +246,8 @@ class GaussianProcessSampling():
         end = time.time()
 
         print(f"HMC took {end - start} ms")
-        # print(chain.shape)
+        # print(chain)
+
         return chain
 
     

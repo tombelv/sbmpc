@@ -27,7 +27,8 @@ class BaseObjective(ABC):
 
     def make_barrier(self, constraint_array):
         # constraint_array = jnp.where(constraint_array > 0, 1e5, 0.0)  
-        constraint_array = jnp.where(constraint_array > 0, 5, 0.0)
+        constraint_array = jnp.where(constraint_array < 0, 5, 0.0)
+        
         return constraint_array
 
     def constraints(self, state, inputs, reference):
@@ -231,17 +232,6 @@ class SamplingBasedMPC:
 
         return optimal_action, gains
 
-    def compute_control_gp(self, state, reference, best_control_vars,):
-        optimal_action = None
-
-        '''
-        Want to sample from gp distribution (instead of randomly) before computing rollouts -> see ~386 and 398!
-        Still want to sort and clip costs, compute weights, etc.
-        Need to compute gains..?
-        '''
-       
-        return optimal_action
-
 
     @partial(jax.vmap, in_axes=(None, None, None, 0), out_axes=(0, 0, 0, 0))
     def get_rollout(self, initial_state, reference, control_variables):
@@ -257,13 +247,15 @@ class SamplingBasedMPC:
             control_variables = self.clip_input_single(control_variables)
 
         constraint_violation = 0
-        final_state = curr_state
         for idx in range(self.horizon):
             cost += self.dt*self.cost_and_constraints(curr_state, control_variables[idx, :], reference[idx, :])
             curr_state = self.model.integrate_rollout_single(curr_state[:self.model.nx], control_variables[idx, :], self.dt)
-            final_state = curr_state
-            l1_dist = jnp.abs(self.objective.constraints(curr_state, control_variables[idx, :], reference[idx, :])) # want the distance from obs to be >= lambda
-            constraint_violation += jnp.sum(l1_dist)
+            # l1_dist = jnp.abs(self.objective.constraints(curr_state, control_variables[idx, :], reference[idx, :])) 
+            # constraint_violation += 1/jnp.sum(l1_dist)
+            # dist_from_obs = self.objective.constraints_not_jit(curr_state, control_variables[idx, :], reference[idx, :])
+            dist_from_obs = self.objective.constraints(curr_state, control_variables[idx, :], reference[idx, :])
+            penalties = jnp.sum(jnp.where(dist_from_obs < 0.0, 1.0, 1e-5)) # close to 0 but not 0 to avoid log errors later on
+            constraint_violation += penalties
         constraint_violation /= self.horizon
         cost += self.dt*self.final_cost_and_constraints(curr_state, reference[self.horizon, :])
         return cost, control_variables, initial_state, constraint_violation
@@ -295,7 +287,7 @@ class SamplingBasedMPC:
             optimal_action = best_control_vars + jnp.sum(weighted_inputs, axis=0)
             self._update_key()
       
-        self.best_control_vars = self._shift_guess(optimal_action)
+        # self.best_control_vars = self._shift_guess(optimal_action)
     
         return rollouts, best_control_vars
 
@@ -394,5 +386,18 @@ class SamplingBasedMPC:
             sampled_variation_all)
 
         return additional_random_parameters
-    
-    
+       
+    def sample_target(self, key):
+        '''
+        # need additional random parameters?
+        # use mean and stddev as in 392 -> pass to get_gp_prob()
+        # best way to get Y..? -> look into getting it in get_gp_prob
+        # redefine target and target_pdf
+        # hmc chain
+        # reshape + 394 and return
+        '''
+
+        additional_random_parameters = self.initial_random_parameters * 0.0
+        sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model.nu)) * self.std_dev
+
+        return
