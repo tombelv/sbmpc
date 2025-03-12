@@ -12,6 +12,9 @@ import sbmpc.settings as settings
 from sbmpc.solvers import BaseObjective, SamplingBasedMPC, Controller
 from sbmpc.obstacle_loader import ObstacleLoader
 from typing import Callable, Tuple, Optional, Dict
+import  sbmpc.sampler as sampler
+import sbmpc.gains as gains
+impo
 
 
 class Visualizer(ABC):
@@ -128,11 +131,11 @@ def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str, num_it
 
 
 class Simulator(ABC):
-    def __init__(self, initial_state, model: BaseModel, solver, num_iter=100, visualizer: Optional[Visualizer] = None, obstacles:bool = True):
+    def __init__(self, initial_state, model: BaseModel, solver: SamplingBasedMPC, sampler: sampler, gains : gains, num_iter=100, visualizer: Optional[Visualizer] = None, obstacles:bool = True):
         self.iter = 0
         self.current_state = initial_state
         self.model = model
-        self.controller = Controller(solver)
+        self.controller = Controller(solver, sampler, gains)
         self.solver = solver
         self.num_iter = num_iter
         self.obstacles = obstacles
@@ -286,18 +289,19 @@ def build_all(config: settings.Config, objective: BaseObjective,
 
     if config.solver_type != settings.Solver.MPPI:
         raise NotImplementedError
-
+    # initialize all the controller components
     solver = SamplingBasedMPC(solver_dynamics_model, objective, config)
-    
+    sampler = sampler.MPPISampler(config, solver_dynamics_model.nu)
+    gains = gains.MPPIGain(config)
     visualize = config.general.visualize
     visualizer_params = {ROBOT_SCENE_PATH_KEY: config.robot.robot_scene_path}
 
     # Setup and run the simulation
     num_iterations = config.sim_iterations
-    sim = Simulation(sim_state_init, sim_dynamics_model, solver, reference, num_iterations, visualize, visualizer_params, obstacles)
+    sim = Simulation(sim_state_init, sim_dynamics_model, solver,sampler,gains, reference, num_iterations, visualize, visualizer_params, obstacles)
     
     # dummy for jitting
-    input_sequence = sim.controller.command(sim.solver, solver_x_init, reference, False).block_until_ready()
+    input_sequence = sim.controller.command(solver_x_init, reference, False).block_until_ready()
     
     return sim
 

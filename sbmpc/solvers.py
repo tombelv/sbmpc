@@ -1,6 +1,7 @@
 from sbmpc.model import BaseModel
 from sbmpc.settings import Config
 from sbmpc.sampler import SBS
+from sbmpc.gains import Gains
 
 import jax.numpy as jnp
 import jax
@@ -205,13 +206,13 @@ class SamplingBasedMPC():
 
         return cost, input_sequence
 
-    def _compute_control_mppi(self, state, reference, sampler, key, gains):
-        additional_random_parameters = sampler.sample_input_sequence(key)
-        
+    def _compute_control_mppi(self, state, reference, best_control_vars, additional_random_parameters, gains):
+        #additional_random_parameters = sampler.sample_input_sequence(key)
+        gradients = None
         if self.config.MPC.smoothing == "Spline":
-            control_vars_all = sampler.best_control_vars[self.control_spline_grid, :] + additional_random_parameters
+            control_vars_all = best_control_vars[self.control_spline_grid, :] + additional_random_parameters
         else:
-            control_vars_all = sampler.best_control_vars + additional_random_parameters
+            control_vars_all = best_control_vars + additional_random_parameters
 
         # Do rollout
         if self.config.MPC.sensitivity:
@@ -222,54 +223,19 @@ class SamplingBasedMPC():
             else:
                 costs, control_vars_all = self.rollout_all(state, reference, control_vars_all)
 
-        additional_random_parameters_clipped = sampler.compute_additional_random_parameters(control_vars_all)
+        additional_random_parameters_clipped = self.compute_additional_random_parameters(control_vars_all, best_control_vars)
         
         # I'll keep the computation of the gains separated (following chat with tommy)
-        if self.compute_gains:
-            # Compute update for weights
-            costs, best_cost, worst_cost = self._sort_and_clip_costs(costs)
-            # exp_costs = self._exp_costs_invariant(costs, best_cost, worst_cost)
-            exp_costs = self._exp_costs_shifted(costs, best_cost)
-            denom = jnp.sum(exp_costs)
-            weights = exp_costs / denom
-            weights_grad_shift = jnp.sum(weights[:, jnp.newaxis] * gradients, axis=0)
-            weights_grad = -self.lam * weights[:, jnp.newaxis] * (gradients - weights_grad_shift)
-            gains = jnp.sum(jnp.einsum('bi,bo->bio', weights_grad, additional_random_parameters_clipped[:, 0, :]), axis=0).T
-
+        
         # updapting the sampling, computing and storing next optimal action
-        optimal_action = sampler.update(costs,control_vars_all)
+        #optimal_action = sampler.update(costs,control_vars_all)
 
-        return optimal_action, gains, sampler
+        return additional_random_parameters_clipped, costs, gradients
 
-
-    def _sort_and_clip_costs(self, costs):
-        # Saturate the cost in case of NaN or inf
-        costs = jnp.where(jnp.isnan(costs), 1e6, costs)
-        costs = jnp.where(jnp.isinf(costs), 1e6, costs)
-        # Take the best found control parameters
-        best_index = jnp.nanargmin(costs)
-        worst_index = jnp.nanargmax(costs)
-        best_cost = costs.take(best_index)
-        worst_cost = costs.take(worst_index)
-
-        return costs, best_cost, worst_cost
-
-    def _exp_costs_shifted(self, costs, best_cost):
-        return jnp.exp(- self.lam * (costs - best_cost))
-
-    def _exp_costs_invariant(self, costs, best_cost, worst_cost):
-        """
-        For a comparison see:
-        G. Rizzi, J. J. Chung, A. Gawel, L. Ott, M. Tognon and R. Siegwart,
-        "Robust Sampling-Based Control of Mobile Manipulators for Interaction With Articulated Objects,"
-        in IEEE Transactions on Robotics, vol. 39, no. 3, pp. 1929-1946, June 2023, doi: 10.1109/TRO.2022.3233343.
-
-        Not used anymore ATM since it does not work with constraints (to be investigated)
-        """
-        h = 20.
-        exp_costs = jnp.exp(- h * (costs - best_cost) / (worst_cost - best_cost))
-
-        return exp_costs
+    def compute_additional_random_parameters(self, control_action, best_control_vars):
+        additional_random_parameters_clipped = (control_action - best_control_vars)
+        return additional_random_parameters_clipped
+    
 
     def _update_key(self):
         newkey, subkey = jax.random.split(self.master_key)
@@ -284,32 +250,39 @@ class Controller:
     
     This is needed to avoid triggering recompilation of the solver function at each iteration.
     """
-    def __init__(self, solver):
+    def __init__(self, solver:  SamplingBasedMPC,sampler : SBS, gains_obj: Gains):
         
         self.last_input = solver.initial_guess
         self.gains = solver.gains
-        self.best_control_vars = solver.best_control_vars 
+        self.solver = solver
+        self.sampler = sampler
+        self.gains_obj = gains_obj
            
     # TODO for now i will pass down the sampler, but maybe it should be internalized in the controller
     # checked with chatgpt and moving them inside should not trigger a jit recomputation for compute_control_mppi
-    def command(self, solver, sampler, state, reference, shift_guess=True, num_steps=1):
+    def command(self, state, reference, shift_guess=True, num_steps=1):
         
         # If the reference is just a state, repeat it along the horizon
         if reference.ndim == 1:
-            reference = jnp.tile(reference, (solver.horizon+1, 1))
+            reference = jnp.tile(reference, (self.solver.horizon+1, 1))
 
         best_control_vars = self.best_control_vars
         # maybe this loop should be jitted to actually be more efficient
         for i in range(num_steps):
-            best_control_vars, gains, sampler = solver.compute_control_mppi(state, reference, sampler, solver.master_key, self.gains)
-            self.gains = gains
-            solver._update_key()
+            self.sampler.sample_input_sequence(self.solver.master_key)
+            samples,costs, gradients = self.solver.compute_control_mppi(state, reference, self.solver.master_key, self.gains)
+            best_control_vars = self.sampler.update(samples,costs)
+            self.gains = self.gains_obj.compute_gains(samples, gradients)
+            self.solver._update_key()
 
         self.last_input = best_control_vars[0]
-
+       
         if shift_guess:
-            self.best_control_vars = _shift_guess(best_control_vars)
+            self.sampler.best_control_vars = _shift_guess(best_control_vars)
         else:
-            self.best_control_vars = best_control_vars
+            self.sampler.best_control_vars = best_control_vars
+
+         # update sampler best control vars
+        self.sampler.best_control_vars = best_control_vars
         
         return best_control_vars   

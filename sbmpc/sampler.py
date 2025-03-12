@@ -25,6 +25,8 @@ class SBS(ABC):
         else:
             self.initial_guess = config.MPC.initial_guess
             self.best_control_vars = jnp.tile(self.initial_guess, (self.horizon, 1))
+        # scaffolding for storing all the control actions on the prediction horizon for each rollout
+        self.zero_random_deviations = jnp.zeros((self.num_parallel_computations, self.num_control_points, self.model_nu), dtype=self.dtype_general)
 
         # this is initialized at the first interation
         self.additional_random_parameters_clipped=None
@@ -34,13 +36,16 @@ class SBS(ABC):
     def sample_input_sequence(self,key) -> jnp.ndarray:
         pass
 
+    #def compute_next_best(self,parameters, costs) -> jnp.ndarray:
+    #    pass
+
     @abstractmethod
     def update(self, parameters, costs) -> jnp.ndarray:
         pass
 
-    def compute_additional_random_parameters(self, control_action):
-        self.additional_random_parameters_clipped = (control_action - self.best_control_vars)
-        return self.additional_random_parameters_clipped
+    # 
+    
+        
 
 
 
@@ -67,7 +72,7 @@ class MPPISampler(SBS):
     def sample_input_sequence(self, key) -> jnp.ndarray:
         # Generate random parameters
         # The first control parameters is the old best one, so we add zero noise there
-        additional_random_parameters = self.initial_random_parameters * 0.0
+        additional_random_parameters = self.zero_random_deviations
         # One sample is kept equal to the guess
         sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model_nu)) * self.std_dev
         additional_random_parameters = additional_random_parameters.at[1:, :, :].set(
@@ -78,12 +83,14 @@ class MPPISampler(SBS):
         exp_costs = self._exp_costs_shifted(costs, jnp.min(costs))
         denom = jnp.sum(exp_costs)
         weights = exp_costs / denom
-        weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * self.additional_random_parameters_clipped
+        weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * parameters
         optimal_action = self.best_control_vars + jnp.sum(weighted_inputs, axis=0)
+        #self.best_control_vars = optimal_action
         return optimal_action
     
     def _exp_costs_shifted(self, costs, best_cost) -> jnp.ndarray:
         return jnp.exp(- self.lam * (costs - best_cost))
+    
 
         
 
