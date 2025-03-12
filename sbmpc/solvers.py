@@ -116,7 +116,7 @@ class SamplingBasedMPC():
         # Jit the controller function
         self.compute_control_mppi = jax.jit(self._compute_control_mppi, device=self.device)
 
-        self.gains = jnp.zeros((model.nu, model.nx))
+        #self.gains = jnp.zeros((model.nu, model.nx))
         # self.ctrl_sens_to_state = jax.jit(jax.jacfwd(self.compute_control_mppi, argnums=0, has_aux=True), device=self.device)
         self.rollout_sens_to_state = jax.vmap(jax.value_and_grad(self.rollout_single, argnums=0, has_aux=True), in_axes=(None, None, 0), out_axes=(0, 0))
 
@@ -205,7 +205,7 @@ class SamplingBasedMPC():
         cost += self.final_cost_and_constraints((curr_state, curr_state_sens), reference[self.horizon, :])
 
         return cost, input_sequence
-
+                
     def _compute_control_mppi(self, state, reference, best_control_vars, additional_random_parameters, gains):
         #additional_random_parameters = sampler.sample_input_sequence(key)
         gradients = None
@@ -250,10 +250,10 @@ class Controller:
     
     This is needed to avoid triggering recompilation of the solver function at each iteration.
     """
-    def __init__(self, solver:  SamplingBasedMPC,sampler : SBS, gains_obj: Gains):
-        
-        self.last_input = solver.initial_guess
-        self.gains = solver.gains
+    def __init__(self, solver:SamplingBasedMPC, sampler : SBS, gains_obj: Gains):
+        # TODO check if we need both initial_guess and last_input
+        self.last_input = sampler.initial_guess
+        #self.gains = solver.gains
         self.solver = solver
         self.sampler = sampler
         self.gains_obj = gains_obj
@@ -266,13 +266,14 @@ class Controller:
         if reference.ndim == 1:
             reference = jnp.tile(reference, (self.solver.horizon+1, 1))
 
-        best_control_vars = self.best_control_vars
+        best_control_vars = self.sampler.best_control_vars
+        gains = self.gains_obj.cur_gains
         # maybe this loop should be jitted to actually be more efficient
         for i in range(num_steps):
-            self.sampler.sample_input_sequence(self.solver.master_key)
-            samples,costs, gradients = self.solver.compute_control_mppi(state, reference, self.solver.master_key, self.gains)
+            additional_random_parameters = self.sampler.sample_input_sequence(self.solver.master_key)
+            samples,costs, gradients = self.solver.compute_control_mppi(state, reference, best_control_vars, additional_random_parameters, gains)
             best_control_vars = self.sampler.update(samples,costs)
-            self.gains = self.gains_obj.compute_gains(samples, gradients)
+            self.gains_obj.cur_gains = self.gains_obj.gains_computation(samples, gradients)
             self.solver._update_key()
 
         self.last_input = best_control_vars[0]

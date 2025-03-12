@@ -43,16 +43,11 @@ class SBS(ABC):
     def update(self, parameters, costs) -> jnp.ndarray:
         pass
 
-    # 
-    
-        
-
-
 
 class CEMSampler(SBS):
 
     def __init__(self,config: Config, model_nu: int) -> None:
-        super.__init__(config, model_nu)
+        super().__init__(config, model_nu)
 
     def sample_input_sequence(self, key) -> jnp.ndarray:
         # Return zero or your logic
@@ -66,7 +61,7 @@ class CEMSampler(SBS):
 class MPPISampler(SBS):
     # TODO initialize control point and parallel computationss
     def __init__(self, config: Config, model_nu: int) -> None:
-        super.__init__(config, model_nu)
+        super().__init__(config, model_nu)
         
        
     def sample_input_sequence(self, key) -> jnp.ndarray:

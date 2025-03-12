@@ -6,13 +6,14 @@ from sbmpc.settings import Config
 
 class Gains(ABC):
 
-    def __init__(self, config: Config) -> None:
-        self.compute_gains = config.MPC.compute_gains
+    def __init__(self, config: Config, model_nu, model_nx) -> None:
+        self.compute_gains = config.MPC.gains
         self.lam = config.MPC.lambda_mpc
+        self.cur_gains =  jnp.zeros((model_nu, model_nx))
         
 
     @abstractmethod
-    def compute_gains(self,key) -> jnp.ndarray:
+    def gains_computation(self,key) -> jnp.ndarray:
         pass
 
 
@@ -20,10 +21,10 @@ class Gains(ABC):
 
 
 class MPPIGain(Gains):
-    def __init__(self, config: Config) -> None:
-        super().__init__(config)
+    def __init__(self, config: Config,model_nu, model_nx) -> None:
+        super().__init__(config,model_nu, model_nx)
 
-    def compute_gains(self, additional_random_paramenters_clipped, gradients) -> jnp.ndarray:
+    def gains_computation(self, additional_random_paramenters_clipped, gradients) -> jnp.ndarray:
         if self.compute_gains:
             # Compute update for weights
             costs, best_cost, worst_cost = self._sort_and_clip_costs(costs)
@@ -34,7 +35,9 @@ class MPPIGain(Gains):
             weights_grad_shift = jnp.sum(weights[:, jnp.newaxis] * gradients, axis=0)
             weights_grad = -self.lam * weights[:, jnp.newaxis] * (gradients - weights_grad_shift)
             gains = jnp.sum(jnp.einsum('bi,bo->bio', weights_grad, additional_random_paramenters_clipped[:, 0, :]), axis=0).T
-
+        else:
+            # if im not computing the gains i return the initial gains which are all zeros
+            gains = self.cur_gains
         return gains 
 
     def _sort_and_clip_costs(self, costs):
