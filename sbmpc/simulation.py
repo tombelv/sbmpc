@@ -12,6 +12,9 @@ import sbmpc.settings as settings
 from sbmpc.solvers import BaseObjective, SamplingBasedMPC, Controller
 from sbmpc.obstacle_loader import ObstacleLoader
 from typing import Callable, Tuple, Optional, Dict
+from  sbmpc.sampler import SBS,MPPISampler
+from  sbmpc.gains import  Gains,MPPIGain
+
 
 class Visualizer(ABC):
     def __init__(self):
@@ -127,11 +130,11 @@ def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str, num_it
 
 
 class Simulator(ABC):
-    def __init__(self, initial_state, model: BaseModel, solver, num_iter=100, visualizer: Optional[Visualizer] = None, obstacles:bool = True):
+    def __init__(self, initial_state, model: BaseModel, solver: SamplingBasedMPC, sampler: SBS, gains : Gains, num_iter=100, visualizer: Optional[Visualizer] = None, obstacles:bool = True):
         self.iter = 0
         self.current_state = initial_state
         self.model = model
-        self.controller = Controller(solver)
+        self.controller = Controller(solver, sampler, gains)
         self.solver = solver
         self.num_iter = num_iter
         self.obstacles = obstacles
@@ -199,7 +202,7 @@ class Simulator(ABC):
 ROBOT_SCENE_PATH_KEY = "robot_scene_path"
 
 class Simulation(Simulator):
-    def __init__(self, initial_state, model, controller, const_reference: jnp.array, num_iterations: int, visualize: bool = True, visualize_params: Optional[Dict] = None, obstacles:bool = True):
+    def __init__(self, initial_state, model, controller, sampler, gains, const_reference: jnp.array, num_iterations: int, visualize: bool = True, visualize_params: Optional[Dict] = None, obstacles:bool = True):
         self.const_reference = const_reference
         visualizer = None
         if visualize:
@@ -208,12 +211,12 @@ class Simulation(Simulator):
                 raise ValueError("if visualizing need to input scene path for mjx")
             visualizer = construct_mj_visualizer_from_model(model, scene_path=scene_path, num_iters=num_iterations)
 
-        super().__init__(initial_state, model, controller, num_iterations, visualizer, obstacles)
+        super().__init__(initial_state, model, controller,sampler,gains, num_iterations, visualizer, obstacles)
 
     def update(self):
         # Compute the optimal input sequence
         time_start = time.time_ns()
-        input_sequence = self.controller.command(self.solver, self.current_state_vec(), self.const_reference, num_steps=1).block_until_ready()
+        input_sequence = self.controller.command(self.current_state_vec(), self.const_reference, num_steps=1).block_until_ready()
         ctrl = input_sequence[0, :].block_until_ready()
         print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
 
@@ -285,18 +288,20 @@ def build_all(config: settings.Config, objective: BaseObjective,
 
     if config.solver_type != settings.Solver.MPPI:
         raise NotImplementedError
-
+    # initialize all the controller components
+    # here we need to add a paramter in the config to manage the different version of sampler and gains
     solver = SamplingBasedMPC(solver_dynamics_model, objective, config)
-    
+    sampler = MPPISampler(config, solver_dynamics_model.nu)
+    gains = MPPIGain(config, solver_dynamics_model.nu, solver_dynamics_model.nx)
     visualize = config.general.visualize
     visualizer_params = {ROBOT_SCENE_PATH_KEY: config.robot.robot_scene_path}
 
     # Setup and run the simulation
     num_iterations = config.sim_iterations
-    sim = Simulation(sim_state_init, sim_dynamics_model, solver, reference, num_iterations, visualize, visualizer_params, obstacles)
+    sim = Simulation(sim_state_init, sim_dynamics_model, solver,sampler,gains, reference, num_iterations, visualize, visualizer_params, obstacles)
     
     # dummy for jitting
-    input_sequence = sim.controller.command(sim.solver, solver_x_init, reference, False).block_until_ready()
+    input_sequence = sim.controller.command(solver_x_init, reference, False).block_until_ready()
     
     return sim
 

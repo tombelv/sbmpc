@@ -1,5 +1,7 @@
 from sbmpc.model import BaseModel
 from sbmpc.settings import Config
+from sbmpc.sampler import SBS
+from sbmpc.gains import Gains
 
 import jax.numpy as jnp
 import jax
@@ -77,7 +79,8 @@ class SamplingBasedMPC():
         self.dt = config.MPC.dt
         # Control horizon of the MPC (steps)
         self.horizon = config.MPC.horizon
-        # Monte-carlo samples, that is the number of trajectories that are evaluated in parallel
+        # Monte-carlo samples, that is the number of trajectories that are evaluated in parallel 
+        # check if we need to move it
         self.num_parallel_computations = config.MPC.num_parallel_computations
 
         self.lam = config.MPC.lambda_mpc
@@ -88,6 +91,7 @@ class SamplingBasedMPC():
         # self.sigma_mppi = jnp.diag(config.MPC.std_dev_mppi**2)
         
         # Total number of inputs over time (stored in a 1d vector)
+        # TODO to remove num_control_variables
         self.num_control_variables = model.nu * self.horizon
         self.num_control_points = config.MPC.num_control_points
         self.control_points_sparsity = self.horizon // self.num_control_points
@@ -100,27 +104,18 @@ class SamplingBasedMPC():
 
         self.clip_input = jax.jit(self.clip_input, device=self.device)
 
-        self.std_dev = config.MPC.std_dev_mppi
-        self.std_dev_horizon = jnp.tile(self.std_dev, self.num_control_points)
-
-        # Initialize the vector storing the current optimal input sequence
-        if config.MPC.initial_guess is None:
-            self.initial_guess = 0.0 * self.std_dev
-            self.best_control_vars = jnp.zeros((self.horizon,self.model.nu), dtype=self.dtype_general)
-        else:
-            self.initial_guess = config.MPC.initial_guess
-            self.best_control_vars = jnp.tile(self.initial_guess, (self.horizon, 1))
         
         self.control_spline_grid = jnp.round(jnp.linspace(0, self.horizon, self.num_control_points)).astype(int).tolist()
 
         self.master_key = jax.random.PRNGKey(420)
+        # TODO maybe to remove?
         self.initial_random_parameters = jnp.zeros((self.num_parallel_computations, self.num_control_points, self.model.nu),
                                                    dtype=self.dtype_general)
 
         # Jit the controller function
         self.compute_control_mppi = jax.jit(self._compute_control_mppi, device=self.device)
 
-        self.gains = jnp.zeros((model.nu, model.nx))
+        #self.gains = jnp.zeros((model.nu, model.nx))
         # self.ctrl_sens_to_state = jax.jit(jax.jacfwd(self.compute_control_mppi, argnums=0, has_aux=True), device=self.device)
         self.rollout_sens_to_state = jax.vmap(jax.value_and_grad(self.rollout_single, argnums=0, has_aux=True), in_axes=(None, None, 0), out_axes=(0, 0))
 
@@ -210,10 +205,10 @@ class SamplingBasedMPC():
         cost += self.final_cost_and_constraints((curr_state, curr_state_sens), reference[self.horizon, :])
 
         return cost, input_sequence
-
-    def _compute_control_mppi(self, state, reference, best_control_vars, key, gains):
-        additional_random_parameters = self.sample_input_sequence(key)
-
+                
+    def _compute_control_mppi(self, state, reference, best_control_vars, additional_random_parameters, gains):
+        #additional_random_parameters = sampler.sample_input_sequence(key)
+        gradients = None
         if self.config.MPC.smoothing == "Spline":
             control_vars_all = best_control_vars[self.control_spline_grid, :] + additional_random_parameters
         else:
@@ -228,24 +223,26 @@ class SamplingBasedMPC():
             else:
                 costs, control_vars_all = self.rollout_all(state, reference, control_vars_all)
 
-        additional_random_parameters_clipped = (control_vars_all - best_control_vars)
+        additional_random_parameters_clipped = self.compute_additional_random_parameters(control_vars_all, best_control_vars)
+        
+        # I'll keep the computation of the gains separated (following chat with tommy)
+        
+        # updapting the sampling, computing and storing next optimal action
+        #optimal_action = sampler.update(costs,control_vars_all)
 
-        # Compute MPPI update
-        costs, best_cost, worst_cost = self._sort_and_clip_costs(costs)
-        # exp_costs = self._exp_costs_invariant(costs, best_cost, worst_cost)
-        exp_costs = self._exp_costs_shifted(costs, best_cost)
+        return additional_random_parameters_clipped, costs, gradients
 
-        denom = jnp.sum(exp_costs)
-        weights = exp_costs / denom
-        if self.compute_gains:
-            weights_grad_shift = jnp.sum(weights[:, jnp.newaxis] * gradients, axis=0)
-            weights_grad = -self.lam * weights[:, jnp.newaxis] * (gradients - weights_grad_shift)
-            gains = jnp.sum(jnp.einsum('bi,bo->bio', weights_grad, additional_random_parameters_clipped[:, 0, :]), axis=0).T
+        # denom = jnp.sum(exp_costs)
+        # weights = exp_costs / denom
+        # if self.compute_gains:
+        #     weights_grad_shift = jnp.sum(weights[:, jnp.newaxis] * gradients, axis=0)
+        #     weights_grad = -self.lam * weights[:, jnp.newaxis] * (gradients - weights_grad_shift)
+        #     gains = jnp.sum(jnp.einsum('bi,bo->bio', weights_grad, additional_random_parameters_clipped[:, 0, :]), axis=0).T
 
-        weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * additional_random_parameters_clipped
-        optimal_action = best_control_vars + jnp.sum(weighted_inputs, axis=0)
+        # weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * additional_random_parameters_clipped
+        # optimal_action = best_control_vars + jnp.sum(weighted_inputs, axis=0)
 
-        return optimal_action, gains
+        # return optimal_action, gains
 
 
     @partial(jax.vmap, in_axes=(None, None, None, 0), out_axes=(0, 0, 0, 0))
@@ -377,55 +374,58 @@ class SamplingBasedMPC():
         exp_costs = jnp.exp(- h * (costs - best_cost) / (worst_cost - best_cost))
 
         return exp_costs
+    def compute_additional_random_parameters(self, control_action, best_control_vars):
+        additional_random_parameters_clipped = (control_action - best_control_vars)
+        return additional_random_parameters_clipped
+    
 
     def _update_key(self):
         newkey, subkey = jax.random.split(self.master_key)
         self.master_key = newkey
     
-
-    def sample_input_sequence(self, key):
-        # Generate random parameters
-        # The first control parameters is the old best one, so we add zero noise there
-        additional_random_parameters = self.initial_random_parameters * 0.0
-        # One sample is kept equal to the guess
-        sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model.nu)) * self.std_dev
-
-        additional_random_parameters = additional_random_parameters.at[1:, :, :].set(
-            sampled_variation_all)
-
-        return additional_random_parameters
-
+    
+# in this we can save solver inside
+# TODO in this we could internalize both sampler and solver as field of controllers and build them inside controller
 class Controller:
     """
     Stateful controller calling the solver function and updating the its memory.
     
     This is needed to avoid triggering recompilation of the solver function at each iteration.
     """
-    def __init__(self, solver):
-        
-        self.last_input = solver.initial_guess
-        self.gains = solver.gains
-        self.best_control_vars = solver.best_control_vars        
-        
-    def command(self, solver, state, reference, shift_guess=True, num_steps=1):
+    def __init__(self, solver:SamplingBasedMPC, sampler : SBS, gains_obj: Gains):
+        # TODO check if we need both initial_guess and last_input
+        self.last_input = sampler.initial_guess
+        #self.gains = solver.gains
+        self.solver = solver
+        self.sampler = sampler
+        self.gains_obj = gains_obj
+           
+    # TODO for now i will pass down the sampler, but maybe it should be internalized in the controller
+    # checked with chatgpt and moving them inside should not trigger a jit recomputation for compute_control_mppi
+    def command(self, state, reference, shift_guess=True, num_steps=1):
         
         # If the reference is just a state, repeat it along the horizon
         if reference.ndim == 1:
-            reference = jnp.tile(reference, (solver.horizon+1, 1))
+            reference = jnp.tile(reference, (self.solver.horizon+1, 1))
 
-        best_control_vars = self.best_control_vars
+        best_control_vars = self.sampler.best_control_vars
+        gains = self.gains_obj.cur_gains
         # maybe this loop should be jitted to actually be more efficient
         for i in range(num_steps):
-            best_control_vars, gains = solver.compute_control_mppi(state, reference, best_control_vars,
-                                                                solver.master_key, self.gains)
-            self.gains = gains
-            solver._update_key()
+            additional_random_parameters = self.sampler.sample_input_sequence(self.solver.master_key)
+            samples,costs, gradients = self.solver.compute_control_mppi(state, reference, best_control_vars, additional_random_parameters, gains)
+            best_control_vars = self.sampler.update(samples,costs)
+            self.gains_obj.cur_gains = self.gains_obj.gains_computation(samples, gradients)
+            self.solver._update_key()
 
         self.last_input = best_control_vars[0]
-
+       
         if shift_guess:
-            self.best_control_vars = _shift_guess(best_control_vars)
+            self.sampler.best_control_vars = _shift_guess(best_control_vars)
         else:
-            self.best_control_vars = best_control_vars
+            self.sampler.best_control_vars = best_control_vars
+
+         # update sampler best control vars
+        self.sampler.best_control_vars = best_control_vars
         
         return best_control_vars   
