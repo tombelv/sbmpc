@@ -1,0 +1,7 @@
+numpy
+matplotlib
+jax
+scipy
+control
+mujoco-mjx
+interpax

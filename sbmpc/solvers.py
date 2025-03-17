@@ -6,7 +6,10 @@ import jax
 
 from functools import partial
 from abc import ABC, abstractmethod
-from sbmpc.filter import cubic_spline_interpolation
+
+from sbmpc.filter import cubic_spline
+
+
 
 class BaseObjective(ABC):
     def __init__(self, robot_model=None):
@@ -26,9 +29,7 @@ class BaseObjective(ABC):
         return self.final_cost(state, reference) + jnp.sum(self.make_barrier(self.terminal_constraints(state, reference)))
 
     def make_barrier(self, constraint_array):
-        # constraint_array = jnp.where(constraint_array > 0, 1e5, 0.0)  
-        constraint_array = jnp.where(constraint_array < 0, 5, 0.0)
-        
+        constraint_array = jnp.where(constraint_array > 0, 1e3, 0.0)
         return constraint_array
 
     def constraints(self, state, inputs, reference):
@@ -38,9 +39,21 @@ class BaseObjective(ABC):
         return 0.0
 
 
-class SamplingBasedMPC:
+@jax.jit
+def _shift_guess(best_control_vars):
+        best_control_vars_shifted = jnp.roll(best_control_vars, shift=-1, axis=0)
+        best_control_vars_shifted = best_control_vars_shifted.at[-1, :].set(
+            best_control_vars_shifted[-2:-1, :].reshape(-1))
+
+        return best_control_vars_shifted
+
+
+class SamplingBasedMPC():
     """
     Sampling-based MPC solver.
+    
+    This solver is static (apart from the master_key)
+    
     """
     def __init__(self, model: BaseModel, objective: BaseObjective, config: Config):
         """
@@ -97,14 +110,8 @@ class SamplingBasedMPC:
         else:
             self.initial_guess = config.MPC.initial_guess
             self.best_control_vars = jnp.tile(self.initial_guess, (self.horizon, 1))
-
-        self.filter = config.MPC.filter
-        if self.filter is not None:
-            self.last_inputs_window = jnp.tile(self.initial_guess, self.filter.window_size//2)
-        else:
-            self.last_inputs_window = jnp.tile(self.initial_guess, 1)
-
-        self.last_input = self.initial_guess
+        
+        self.control_spline_grid = jnp.round(jnp.linspace(0, self.horizon, self.num_control_points)).astype(int).tolist()
 
         self.master_key = jax.random.PRNGKey(420)
         self.initial_random_parameters = jnp.zeros((self.num_parallel_computations, self.num_control_points, self.model.nu),
@@ -120,25 +127,33 @@ class SamplingBasedMPC:
         # Rename functions for cost during rollout
         self.cost_and_constraints = self.objective.cost_and_constraints
         self.final_cost_and_constraints = self.objective.final_cost_and_constraints
+        
+        
 
+    
     @partial(jax.vmap, in_axes=(None, 0), out_axes=0)
     def clip_input(self, control_variables):
         return jnp.clip(control_variables, self.input_min_full_horizon, self.input_max_full_horizon)
 
     def clip_input_single(self, control_variables):
         return jnp.clip(control_variables, self.input_min_full_horizon, self.input_max_full_horizon)
+    
+    # def clip_input_samples(self, control_variables):
+    #     return jnp.clip(control_variables, self.input_min_full_horizon[self.control_spline_grid[1:], :], self.input_max_full_horizon[self.control_spline_grid[1:], :])
 
     @partial(jax.vmap, in_axes=(None, None, None, 0), out_axes=(0, 0))
     def rollout_all(self, initial_state, reference, control_variables):
         return self.rollout_single(initial_state, reference, control_variables)
-
+    
     def rollout_single(self, initial_state, reference, control_variables):
+        
         cost = 0.0
         curr_state = initial_state
         # rollout_states = jnp.zeros((self.horizon+1, self.model.nx), dtype=self.dtype_general)
         # rollout_states = rollout_states.at[0, :].set(initial_state)
         if self.config.MPC.smoothing == "Spline":
-            control_interp = cubic_spline_interpolation(jnp.arange(0, self.horizon, self.control_points_sparsity),
+            # control_variables = self.clip_input_samples(control_variables)
+            control_interp = cubic_spline(self.control_spline_grid,
                                                         control_variables,
                                                         jnp.arange(0, self.horizon))
             control_variables = self.clip_input_single(control_interp)
@@ -147,16 +162,18 @@ class SamplingBasedMPC:
 
         # if self.config.MPC["augmented_reference"]:
         #     reference = reference.at[1:, -self.model.nu - 1:-1].set(control_variables)
-        constraint_vio = 0
-        for idx in range(self.horizon):
-            # We multiply the cost by the timestep to mimic a continuous time integration and make it work better when
-            # changing the timestep and time horizon jointly
+        
+        def cost_and_state_rollout(idx, cost_and_state):
+            cost, curr_state = cost_and_state
             cost += self.dt*self.cost_and_constraints(curr_state, control_variables[idx, :], reference[idx, :])
-            curr_state = self.model.integrate_rollout_single(curr_state[:self.model.nx], control_variables[idx, :], self.dt)
-            l1_dist = self.objective.constraints(curr_state, control_variables[idx, :], reference[idx, :])
-            constraint_vio += l1_dist
-            # rollout_states = rollout_states. at[idx+1, :].set(curr_state)
-        cost += self.dt*self.final_cost_and_constraints(curr_state, reference[self.horizon, :])
+            next_state = self.model.integrate_rollout_single(curr_state, control_variables[idx, :], self.dt)
+            
+            return cost, next_state
+
+        cost, final_state = jax.lax.fori_loop(0, self.horizon, cost_and_state_rollout, (cost, curr_state))
+
+        cost += self.dt*self.final_cost_and_constraints(final_state, reference[self.horizon, :])
+
         return cost, control_variables
     
 
@@ -175,7 +192,7 @@ class SamplingBasedMPC:
         curr_state = initial_state
         input_sequence = jnp.zeros((self.horizon, self.model.nu), dtype=self.dtype_general)
         if self.config.MPC["smoothing"] == "Spline":
-            control_interp = cubic_spline_interpolation(jnp.arange(0, self.horizon, self.control_points_sparsity),
+            control_interp = cubic_spline(jnp.arange(0, self.horizon, self.control_points_sparsity),
                                         control_variables,
                                         jnp.arange(0, self.horizon))
             control_variables = self.clip_input_single(control_interp)
@@ -198,7 +215,7 @@ class SamplingBasedMPC:
         additional_random_parameters = self.sample_input_sequence(key)
 
         if self.config.MPC.smoothing == "Spline":
-            control_vars_all = best_control_vars[::self.control_points_sparsity, :] + additional_random_parameters
+            control_vars_all = best_control_vars[self.control_spline_grid, :] + additional_random_parameters
         else:
             control_vars_all = best_control_vars + additional_random_parameters
 
@@ -211,7 +228,7 @@ class SamplingBasedMPC:
             else:
                 costs, control_vars_all = self.rollout_all(state, reference, control_vars_all)
 
-        additional_random_parameters_clipped = control_vars_all - best_control_vars
+        additional_random_parameters_clipped = (control_vars_all - best_control_vars)
 
         # Compute MPPI update
         costs, best_cost, worst_cost = self._sort_and_clip_costs(costs)
@@ -224,8 +241,6 @@ class SamplingBasedMPC:
             weights_grad_shift = jnp.sum(weights[:, jnp.newaxis] * gradients, axis=0)
             weights_grad = -self.lam * weights[:, jnp.newaxis] * (gradients - weights_grad_shift)
             gains = jnp.sum(jnp.einsum('bi,bo->bio', weights_grad, additional_random_parameters_clipped[:, 0, :]), axis=0).T
-        else:
-            gains = jnp.zeros_like(self.gains)
 
         weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * additional_random_parameters_clipped
         optimal_action = best_control_vars + jnp.sum(weighted_inputs, axis=0)
@@ -239,7 +254,7 @@ class SamplingBasedMPC:
         cost = 0.0
         curr_state = initial_state
         if self.config.MPC.smoothing == "Spline":
-            control_interp = cubic_spline_interpolation(jnp.arange(0, self.horizon, self.control_points_sparsity),
+            control_interp = cubic_spline(jnp.arange(0, self.horizon, self.control_points_sparsity),
                                                         control_variables,
                                                         jnp.arange(0, self.horizon))
             control_variables = self.clip_input_single(control_interp)
@@ -366,14 +381,7 @@ class SamplingBasedMPC:
     def _update_key(self):
         newkey, subkey = jax.random.split(self.master_key)
         self.master_key = newkey
-
-    @partial(jax.jit, static_argnums=(0,), device=jax.devices("cpu")[0])
-    def _shift_guess(self, best_control_vars):
-        best_control_vars_shifted = jnp.roll(best_control_vars, shift=-1, axis=0)
-        best_control_vars_shifted = best_control_vars_shifted.at[-1, :].set(
-            best_control_vars_shifted[-2:-1, :].reshape(-1))
-
-        return best_control_vars_shifted
+    
 
     def sample_input_sequence(self, key):
         # Generate random parameters
@@ -386,18 +394,38 @@ class SamplingBasedMPC:
             sampled_variation_all)
 
         return additional_random_parameters
-       
-    def sample_target(self, key):
-        '''
-        # need additional random parameters?
-        # use mean and stddev as in 392 -> pass to get_gp_prob()
-        # best way to get Y..? -> look into getting it in get_gp_prob
-        # redefine target and target_pdf
-        # hmc chain
-        # reshape + 394 and return
-        '''
 
-        additional_random_parameters = self.initial_random_parameters * 0.0
-        sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model.nu)) * self.std_dev
+class Controller:
+    """
+    Stateful controller calling the solver function and updating the its memory.
+    
+    This is needed to avoid triggering recompilation of the solver function at each iteration.
+    """
+    def __init__(self, solver):
+        
+        self.last_input = solver.initial_guess
+        self.gains = solver.gains
+        self.best_control_vars = solver.best_control_vars        
+        
+    def command(self, solver, state, reference, shift_guess=True, num_steps=1):
+        
+        # If the reference is just a state, repeat it along the horizon
+        if reference.ndim == 1:
+            reference = jnp.tile(reference, (solver.horizon+1, 1))
 
-        return
+        best_control_vars = self.best_control_vars
+        # maybe this loop should be jitted to actually be more efficient
+        for i in range(num_steps):
+            best_control_vars, gains = solver.compute_control_mppi(state, reference, best_control_vars,
+                                                                solver.master_key, self.gains)
+            self.gains = gains
+            solver._update_key()
+
+        self.last_input = best_control_vars[0]
+
+        if shift_guess:
+            self.best_control_vars = _shift_guess(best_control_vars)
+        else:
+            self.best_control_vars = best_control_vars
+        
+        return best_control_vars   

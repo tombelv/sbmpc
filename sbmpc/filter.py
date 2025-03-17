@@ -6,6 +6,7 @@ import jax
 from jax.scipy.signal import convolve
 from math import factorial
 
+import interpax
 
 class MovingAverage:
     def __init__(self, window_size: int = 3, step_size: int = 1):
@@ -61,56 +62,7 @@ class SavitzkyGolay:
         return convolve(self.m[::-1], y_, mode='valid')
 
 
-@partial(jax.vmap, in_axes=(None, 1, None), out_axes=1)
-def cubic_spline_interpolation(x, y, x_new):
-    """
-    Perform cubic spline interpolation.
-
-    Args:
-    x: jnp.array, original x coordinates
-    y: jnp.array, original y coordinates
-    x_new: jnp.array, x coordinates to interpolate
-
-    Returns:
-    jnp.array, interpolated y values at x_new
-    """
-    n = x.shape[0]
-
-    # Calculate the differences and weighted sums
-    h = jnp.diff(x)
-    a = jnp.diff(y) / h
-
-    # Calculate the coefficients
-    A = jnp.zeros((n, n))
-    b = jnp.zeros(n)
-    A = A.at[0, 0].set(1)
-    A = A.at[-1, -1].set(1)
-
-    def body_fun(i, val):
-        A, b = val
-        A = A.at[i, i - 1].set(h[i - 1])
-        A = A.at[i, i].set(2 * (h[i - 1] + h[i]))
-        A = A.at[i, i + 1].set(h[i])
-        b = b.at[i].set(3 * (a[i] - a[i - 1]))
-        return A, b
-
-    A, b = jax.lax.fori_loop(1, n - 1, body_fun, (A, b))
-
-    # Solve the tridiagonal system
-    c = jnp.linalg.solve(A, b)
-
-    # Compute the coefficients d and b
-    d = jnp.diff(c) / (3 * h)
-    b = a - h * (2 * c[:-1] + c[1:]) / 3
-
-    # Perform interpolation
-    def find_interval(x_i):
-        return jnp.searchsorted(x, x_i, side='right') - 1
-
-    def interpolate(x_i):
-        idx = find_interval(x_i)
-        dx = x_i - x[idx]
-        return (y[idx] + dx * (b[idx] + dx * (c[idx] + dx * d[idx])))
-
-    return jax.vmap(interpolate)(x_new)
+def cubic_spline(x, y, x_new):
+    spline = interpax.CubicSpline(x, y, bc_type="natural", check=False, axis=0)
+    return spline(x_new)
 

@@ -107,8 +107,8 @@ class RobotConfig:
 
 class MPCConfig:
     def __init__(self):
-        self._dt = 0.02
-        self._horizon = 25
+        self._dt = 0.0
+        self._horizon = 1
         self._num_parallel_computations = 1000
         self._lambda_mpc = 1.0
         self._nu = None
@@ -117,9 +117,9 @@ class MPCConfig:
         self._filter = None
         self._gains = False
         self._sensitivity = False
-        self._smoothing = "Spline"
+        self._smoothing = None
         self._augmented_reference = None
-        self._num_control_points = 5
+        self._num_control_points = 0
 
     def set_from_model_config(self, config: RobotConfig):
         self.nu = config.nu
@@ -236,9 +236,9 @@ class MPCConfig:
 
     @smoothing.setter
     def smoothing(self, value):
-        if not isinstance(value, str):
+        if not isinstance(value, str) and value != None:
             raise ValueError("str type is expected")
-        supported_smoothing = ["Spline"]
+        supported_smoothing = ["Spline", None]
         if value not in supported_smoothing:
             raise ValueError(f"smoothing not supported. Choose from {supported_smoothing}")
         self._smoothing = value

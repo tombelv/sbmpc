@@ -66,6 +66,7 @@ def quadrotor_dynamics(state: jnp.array, inputs: jnp.array, params: jnp.array) -
                                  0.5 * quat_product(quat, ang_vel_quat),
                                  orientation_mat @ acc[:3],
                                  acc[3:6]])
+
     return state_dot
 
 
@@ -80,7 +81,7 @@ class Objective(BaseObjective):
 
         return pos_err, att_err, vel_err, ang_vel_err
 
-    def running_cost(self, state: jnp.array, inputs: jnp.array, reference) -> jnp.float32:
+    def running_cost(self, state: jnp.array, inputs: jnp.array, reference):
         state_ref = reference[:13]
         state_ref = state_ref.at[7:10].set(-1*(state[0:3] - state_ref[0:3]))
         input_ref = reference[13:13+4]
@@ -114,11 +115,11 @@ if __name__ == "__main__":
     
     config = settings.Config(robot_config)
 
-    config.general.visualize = True
+    config.general.visualize = False
     config.MPC.dt = 0.02
     config.MPC.horizon = 25
     config.MPC.std_dev_mppi = 0.2*jnp.array([0.1, 0.1, 0.1, 0.05])
-    config.MPC.num_parallel_computations = 2000
+    config.MPC.num_parallel_computations = 1000
     config.MPC.initial_guess = INPUT_HOVER
     config.MPC.lambda_mpc = 50.0
     config.MPC.smoothing = "Spline"
@@ -126,7 +127,7 @@ if __name__ == "__main__":
     config.MPC.gains = False
 
     config.solver_dynamics = settings.DynamicsModel.CUSTOM
-    config.sim_dynamics = settings.DynamicsModel.MJX
+    config.sim_dynamics = settings.DynamicsModel.CUSTOM
 
     # x_init = jnp.concatenate([robot_config[settings.ROBOT_Q_INIT_KEY],
     #                  jnp.zeros(robot_config[settings.ROBOT_NV_KEY], dtype=jnp.float32)], axis=0)
@@ -142,7 +143,7 @@ if __name__ == "__main__":
     sim = build_all(config, objective,
                     reference,
                     custom_dynamics_fn=quadrotor_dynamics,
-                    obstacles = False)
+                    obstacles=False)
 
     sim.simulate()
 
@@ -159,4 +160,5 @@ if __name__ == "__main__":
     plt.plot(time_vect[:-1], sim.input_traj)
     plt.legend(["F", "t_x", "t_y", "t_z"])
     plt.grid()
+
     plt.show()
