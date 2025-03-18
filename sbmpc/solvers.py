@@ -271,19 +271,18 @@ class Controller:
         # maybe this loop should be jitted to actually be more efficient
         for i in range(num_steps):
             additional_random_parameters = self.sampler.sample_input_sequence(self.solver.master_key)
-            samples,costs, gradients = self.solver.compute_control_mppi(state, reference, best_control_vars, additional_random_parameters, gains)
-            best_control_vars = self.sampler.update(samples,costs)
+            samples, costs, gradients = self.solver.compute_control_mppi(state, reference, best_control_vars, additional_random_parameters, gains)
+            best_control_vars = self.sampler.update(samples, costs)
             self.gains_obj.cur_gains = self.gains_obj.gains_computation(samples, gradients)
             self.solver._update_key()
 
         self.last_input = best_control_vars[0]
        
+        # update sampler best control vars
         if shift_guess:
             self.sampler.best_control_vars = _shift_guess(best_control_vars)
         else:
             self.sampler.best_control_vars = best_control_vars
 
-         # update sampler best control vars
-        self.sampler.best_control_vars = best_control_vars
         
         return best_control_vars   

@@ -74,7 +74,7 @@ class MPPISampler(SBS):
             sampled_variation_all)
         return sampled_variation_all
 
-    def update(self,parameters, costs) -> jnp.ndarray:
+    def update(self, parameters, costs) -> jnp.ndarray:
         exp_costs = self._exp_costs_shifted(costs, jnp.min(costs))
         denom = jnp.sum(exp_costs)
         weights = exp_costs / denom
