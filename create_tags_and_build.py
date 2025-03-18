@@ -11,7 +11,6 @@ RELEASE_TYPE_MAJOR = "major"
 # order of list should match order of numbers in version
 SUPPORTED_RELEASE_TYPES = [RELEASE_TYPE_MAJOR, RELEASE_TYPE_MINOR, RELEASE_TYPE_HOTFIX]
 
-VERSION_FILE_NAME = "version.txt"
 
 def get_git_branch():
     result = subprocess.run(['git', 'branch', '--show-current'], stdout=subprocess.PIPE, check=True)
@@ -21,7 +20,10 @@ def get_git_branch():
 def get_latest_git_tag():
     result = subprocess.run(['git', 'tag', '--sort=-creatordate'], stdout=subprocess.PIPE, check=True)
     tags = result.stdout.decode().split("\n")
-    tag_name = tags[0].strip()
+    if tags[0] == "v":
+        tag_name = tags[1].strip()
+    else:
+        tag_name = tags[0].strip()
     return tag_name
 
 def create_tag_with_annotation(tag_name: str, annotation: str):
@@ -30,15 +32,11 @@ def create_tag_with_annotation(tag_name: str, annotation: str):
 
 
 def build_wheel():
-    result = subprocess.run([sys.executable, '-m', 'pip', 'install', '--upgrade', 'build'], stdout=subprocess.PIPE, check=True)
-    result = subprocess.run([sys.executable, '-m', 'build'], stdout=subprocess.PIPE, check=True)
+    result = subprocess.run(['hatch', 'build'], stdout=subprocess.PIPE, check=True)
     out = result.stdout.decode()
     print(out.split("\n")[-2:])
 
-def write_new_version_to_file(tag_name: str):
-    with open(VERSION_FILE_NAME, "w") as file_handle:
-        new_str = f"VERSION = '{tag_name}'"
-        file_handle.write(new_str)
+
 
 def main(release_type: str, tag_and_push: bool = False):
 
@@ -59,7 +57,7 @@ def main(release_type: str, tag_and_push: bool = False):
         nums = [int(n) for n in nums]
         nums[i] = nums[i] + 1
         str_nums = [str(n) for n in nums]
-        new_tag = ".".join(str_nums)
+        new_tag = "v" + ".".join(str_nums)
     if tag_and_push:
         print("please enter an annotation for the new tag--a sentence or two about the new features or bugfixes since the last version. Press [enter] when done.")
         annotation = input()
@@ -70,8 +68,6 @@ def main(release_type: str, tag_and_push: bool = False):
         create_tag_with_annotation(new_tag, annotation)
     else:
         print(f"the tag we would have created would have been: {new_tag}, prior tag {latest_tag}")
-    # our build tool looks to this file for the version number
-    write_new_version_to_file(new_tag)
 
     # now that we've tagged, we can build the wheel file
     print("building wheel...")
