@@ -20,10 +20,7 @@ def get_git_branch():
 def get_latest_git_tag():
     result = subprocess.run(['git', 'tag', '--sort=-creatordate'], stdout=subprocess.PIPE, check=True)
     tags = result.stdout.decode().split("\n")
-    if tags[0] == "v":
-        tag_name = tags[1].strip()
-    else:
-        tag_name = tags[0].strip()
+    tag_name = (tags[0].strip())[1:]
     return tag_name
 
 def create_tag_with_annotation(tag_name: str, annotation: str):
