@@ -4,6 +4,8 @@ import jax
 import jax.numpy as jnp
 from sbmpc.settings import Config
 
+from functools import partial
+
 class Gains(ABC):
 
     def __init__(self, config: Config, model_nu, model_nx) -> None:
@@ -24,6 +26,7 @@ class MPPIGain(Gains):
     def __init__(self, config: Config,model_nu, model_nx) -> None:
         super().__init__(config,model_nu, model_nx)
 
+    @partial(jax.jit, static_argnums=(0,))
     def gains_computation(self, costs, samples_delta, gradients) -> jnp.ndarray:
         if self.compute_gains:
             # Compute update for weights

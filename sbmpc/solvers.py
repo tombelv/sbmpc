@@ -239,7 +239,6 @@ class Controller:
         self.gains_obj = gains_obj
            
     # TODO for now i will pass down the sampler, but maybe it should be internalized in the controller
-    # checked with chatgpt and moving them inside should not trigger a jit recomputation for compute_control_mppi
     def command(self, state, reference, shift_guess=True, num_steps=1):
         
         # If the reference is just a state, repeat it along the horizon
