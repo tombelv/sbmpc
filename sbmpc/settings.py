@@ -24,6 +24,7 @@ class RobotConfig:
         self._nq = None
         self._nv = None
         self._nu = None
+        self._nx = None
 
         self._input_min = None
         self._input_max = None
@@ -71,6 +72,8 @@ class RobotConfig:
         if not isinstance(value, int):
             raise ValueError("int type is expected")
         self._nq = value
+        if self._nv is not None:
+            self._nx = self._nq + self._nv
     
     @property
     def nv(self):
@@ -81,8 +84,14 @@ class RobotConfig:
         if not isinstance(value, int):
             raise ValueError("int type is expected")
         self._nv = value
+        if self._nq is not None:
+            self._nx = self._nq + self._nv
     
-    
+    @property
+    def nx(self):
+        return self._nx
+
+
     @property
     def nu(self):
         return self._nu
@@ -106,14 +115,11 @@ class RobotConfig:
 
 
 class MPCConfig:
-    def __init__(self):
+    def __init__(self, config: RobotConfig):
         self._dt = 0.0
         self._horizon = 1
         self._num_parallel_computations = 1000
         self._lambda_mpc = 1.0
-        self._nu = None
-        self._std_dev_mppi = None
-        self._initial_guess = None
         self._filter = None
         self._gains = False
         self._sensitivity = False
@@ -121,10 +127,9 @@ class MPCConfig:
         self._augmented_reference = None
         self._num_control_points = 0
 
-    def set_from_model_config(self, config: RobotConfig):
-        self.nu = config.nu
-        self._std_dev_mppi = jnp.zeros(self.nu)
-        self._initial_guess = jnp.zeros(self.nu)
+        self._std_dev_mppi = jnp.zeros(config.nu)
+        self._initial_guess = jnp.zeros(config.nu)
+        
 
     @property
     def dt(self):
@@ -169,16 +174,6 @@ class MPCConfig:
         self._lambda_mpc = value
 
     @property
-    def nu(self):
-        return self._nu
-
-    @nu.setter
-    def nu(self, value: int):
-        if not isinstance(value, int):
-            raise ValueError("int type is expected")
-        self._nu = value
-
-    @property
     def std_dev_mppi(self):
         return self._std_dev_mppi
 
@@ -186,8 +181,8 @@ class MPCConfig:
     def std_dev_mppi(self, value: Array):
         if not isinstance(value, Array):
             raise ValueError("jax Array type is expected")
-        if len(value) != self._nu:
-            raise ValueError("length must match self.nu")
+        if len(value) != self._std_dev_mppi.size:
+            raise ValueError("length must match nu")
         self._std_dev_mppi = value
 
     @property
@@ -198,8 +193,8 @@ class MPCConfig:
     def initial_guess(self, value: Array):
         if ((not isinstance(value, Array)) and (value is not None)):
             raise ValueError("jax Array type or None is expected")
-        if value is not None and len(value) != self._nu:
-            raise ValueError("length must match self.nu")
+        if value is not None and len(value) != self._initial_guess.size:
+            raise ValueError("length must match nu")
         self._initial_guess = value
 
     @property
@@ -321,9 +316,8 @@ class Config:
         self.solver_dynamics = DynamicsModel.CUSTOM
         self.solver_type = Solver.MPPI
 
-        self.sim_dynamics = DynamicsModel.MJX
+        self.sim_dynamics = DynamicsModel.CUSTOM
         self.sim_iterations = 500
 
-        self.MPC = MPCConfig()
-        self.MPC.set_from_model_config(robot_config)
+        self.MPC = MPCConfig(robot_config)
 

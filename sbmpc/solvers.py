@@ -47,7 +47,7 @@ class RolloutGenerator():
 
     def __init__(self, model: BaseModel, objective: BaseObjective, config: Config):
         """
-        Initializes the solver with the model, the objective, configurations and initial guess.
+        Initializes the rollout generator with the model, the objective, configurations and initial guess.
         Parameters
         ----------
         model: BaseModel
@@ -201,13 +201,16 @@ class RolloutGenerator():
 
     @partial(jax.jit, static_argnums=(0,))  
     def do_rollout(self, state, reference, optimal_samples, samples_delta, gains):
-
         gradients = None
 
         if self.config.MPC.smoothing == "Spline":
             control_vars_all = optimal_samples[self.control_spline_grid, :] + samples_delta
         else:
             control_vars_all = optimal_samples + samples_delta
+
+        # If the reference is just a state, repeat it along the horizon
+        if reference.ndim == 1:
+            reference = jnp.tile(reference, (self.horizon+1, 1))
 
         if self.compute_gains:
             (costs, control_vars_all), gradients = self.rollout_sens_to_state(state, reference, control_vars_all)
@@ -225,32 +228,21 @@ class RolloutGenerator():
         return samples_delta_clipped
     
     
-    
 class Controller:
-    """
-    Stateful controller calling the solver function and updating the its memory.
-    
-    This is needed to avoid triggering recompilation of the solver function at each iteration.
-    """
-    def __init__(self, solver : RolloutGenerator, sampler : Sampler, gains_obj: Gains):
+    def __init__(self, rollout_gen : RolloutGenerator, sampler : Sampler, gains_obj: Gains):
 
-        self.solver = solver
+        self.rollout_gen = rollout_gen
         self.sampler = sampler
         self.gains_obj = gains_obj
            
-    # TODO for now i will pass down the sampler, but maybe it should be internalized in the controller
     def command(self, state, reference, shift_guess=True, num_steps=1):
-        
-        # If the reference is just a state, repeat it along the horizon
-        if reference.ndim == 1:
-            reference = jnp.tile(reference, (self.solver.horizon+1, 1))
 
         optimal_samples = self.sampler.optimal_samples
         gains = self.gains_obj.cur_gains
-        # maybe this loop should be jitted to actually be more efficient
+
         for i in range(num_steps):
             samples_delta = self.sampler.sample_input_sequence(self.sampler.master_key)
-            samples, costs, gradients = self.solver.do_rollout(state, reference, optimal_samples, samples_delta, gains)
+            samples, costs, gradients = self.rollout_gen.do_rollout(state, reference, optimal_samples, samples_delta, gains)
             optimal_samples = self.sampler.update(optimal_samples, samples, costs)
             # update gains
             self.gains_obj.cur_gains = self.gains_obj.gains_computation(costs, samples, gradients)

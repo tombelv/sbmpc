@@ -8,10 +8,10 @@ from functools import partial
 
 class Gains(ABC):
 
-    def __init__(self, config: Config, model_nu, model_nx) -> None:
+    def __init__(self, config: Config) -> None:
         self.compute_gains = config.MPC.gains
         self.lam = config.MPC.lambda_mpc
-        self.cur_gains =  jnp.zeros((model_nu, model_nx))
+        self.cur_gains =  jnp.zeros((config.robot.nu, config.robot.nx))
         
 
     @abstractmethod
@@ -23,8 +23,8 @@ class Gains(ABC):
 
 
 class MPPIGain(Gains):
-    def __init__(self, config: Config,model_nu, model_nx) -> None:
-        super().__init__(config,model_nu, model_nx)
+    def __init__(self, config: Config) -> None:
+        super().__init__(config)
 
     @partial(jax.jit, static_argnums=(0,))
     def gains_computation(self, costs, samples_delta, gradients) -> jnp.ndarray:

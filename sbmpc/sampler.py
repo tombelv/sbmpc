@@ -6,8 +6,6 @@ from sbmpc.settings import Config
 
 from functools import partial
 
-# TODO understand the role of initial_guess and intial_random_samples and how to initialize optimal_samples at the beggining
-
 class Sampler(ABC):
 
     def __init__(self, config: Config) -> None:
@@ -22,11 +20,9 @@ class Sampler(ABC):
         # Monte-carlo samples, that is the number of trajectories that are evaluated in parallel
         self.num_parallel_computations = config.MPC.num_parallel_computations
         if config.MPC.initial_guess is None:
-            self.initial_guess = 0.0 * self.std_dev
-            self.optimal_samples = jnp.zeros((self.horizon,self.model_nu), dtype=self.dtype_general)
+            self.optimal_samples = jnp.zeros((self.horizon, self.model_nu), dtype=self.dtype_general)
         else:
-            self.initial_guess = config.MPC.initial_guess
-            self.optimal_samples = jnp.tile(self.initial_guess, (self.horizon, 1))
+            self.optimal_samples = jnp.tile(config.MPC.initial_guess, (self.horizon, 1))
         # scaffolding for storing all the control actions on the prediction horizon for each rollout
         self.zero_random_deviations = jnp.zeros((self.num_parallel_computations, self.num_control_points, self.model_nu), dtype=self.dtype_general)
 
@@ -68,14 +64,12 @@ class CEMSampler(Sampler):
         return initial_guess
 
 class MPPISampler(Sampler):
-    # TODO initialize control point and parallel computationss
     def __init__(self, config: Config) -> None:
         super().__init__(config)
         
     @partial(jax.jit, static_argnums=(0,))
     def sample_input_sequence(self, key) -> jnp.ndarray:
         # Generate random samples
-        # The first control samples is the old best one, so we add zero noise there
         samples_delta = self.zero_random_deviations
         # One sample is kept equal to the guess
         sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model_nu)) * self.std_dev
@@ -96,8 +90,6 @@ class MPPISampler(Sampler):
         self._update_key()
         return optimal_action
 
-        
-    
     def _exp_costs_shifted(self, costs, best_cost) -> jnp.ndarray:
         return jnp.exp(- self.lam * (costs - best_cost))
     
