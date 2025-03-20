@@ -9,10 +9,10 @@ import logging
 import traceback
 from sbmpc.model import BaseModel, Model, ModelMjx
 import sbmpc.settings as settings
-from sbmpc.solvers import BaseObjective, SamplingBasedMPC, Controller
+from sbmpc.solvers import BaseObjective, RolloutGenerator, Controller
 from sbmpc.obstacle_loader import ObstacleLoader
 from typing import Callable, Tuple, Optional, Dict
-from  sbmpc.sampler import SBS,MPPISampler
+from  sbmpc.sampler import Sampler, MPPISampler
 from  sbmpc.gains import  Gains,MPPIGain
 
 
@@ -131,7 +131,7 @@ def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str, num_it
 
 
 class Simulator(ABC):
-    def __init__(self, initial_state, model: BaseModel, solver: SamplingBasedMPC, sampler: SBS, gains : Gains, num_iter=100, visualizer: Optional[Visualizer] = None, obstacles:bool = True):
+    def __init__(self, initial_state, model: BaseModel, solver: RolloutGenerator, sampler: Sampler, gains : Gains, num_iter=100, visualizer: Optional[Visualizer] = None, obstacles:bool = True):
         self.iter = 0
         self.current_state = initial_state
         self.model = model
@@ -265,7 +265,7 @@ def build_model_and_solver(config: settings.Config, objective: BaseObjective, cu
         raise NotImplementedError
     solver_dynamics_model_setting = config.solver_dynamics
     system, solver_x_init, sim_state_init = build_model_from_config(solver_dynamics_model_setting, config, custom_dynamics_fn)
-    solver = SamplingBasedMPC(system, objective, config)
+    solver = RolloutGenerator(system, objective, config)
     return system, solver
 
 def build_all(config: settings.Config, objective: BaseObjective,
@@ -291,8 +291,8 @@ def build_all(config: settings.Config, objective: BaseObjective,
         raise NotImplementedError
     # initialize all the controller components
     # here we need to add a paramter in the config to manage the different version of sampler and gains
-    solver = SamplingBasedMPC(solver_dynamics_model, objective, config)
-    sampler = MPPISampler(config, solver_dynamics_model.nu)
+    solver = RolloutGenerator(solver_dynamics_model, objective, config)
+    sampler = MPPISampler(config)
     gains = MPPIGain(config, solver_dynamics_model.nu, solver_dynamics_model.nx)
     visualize = config.general.visualize
     visualizer_params = {ROBOT_SCENE_PATH_KEY: config.robot.robot_scene_path}
