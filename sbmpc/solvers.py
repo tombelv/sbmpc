@@ -231,19 +231,7 @@ class SamplingBasedMPC():
         #optimal_action = sampler.update(costs,control_vars_all)
 
         return additional_random_parameters_clipped, costs, gradients
-
-        # denom = jnp.sum(exp_costs)
-        # weights = exp_costs / denom
-        # if self.compute_gains:
-        #     weights_grad_shift = jnp.sum(weights[:, jnp.newaxis] * gradients, axis=0)
-        #     weights_grad = -self.lam * weights[:, jnp.newaxis] * (gradients - weights_grad_shift)
-        #     gains = jnp.sum(jnp.einsum('bi,bo->bio', weights_grad, additional_random_parameters_clipped[:, 0, :]), axis=0).T
-
-        # weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * additional_random_parameters_clipped
-        # optimal_action = best_control_vars + jnp.sum(weighted_inputs, axis=0)
-
-        # return optimal_action, gains
-
+    
 
     @partial(jax.vmap, in_axes=(None, None, None, 0), out_axes=(0, 0, 0, 0))
     def get_rollout(self, initial_state, reference, control_variables):
@@ -403,7 +391,6 @@ class Controller:
     # TODO for now i will pass down the sampler, but maybe it should be internalized in the controller
     # checked with chatgpt and moving them inside should not trigger a jit recomputation for compute_control_mppi
     def command(self, state, reference, shift_guess=True, num_steps=1):
-        
         # If the reference is just a state, repeat it along the horizon
         if reference.ndim == 1:
             reference = jnp.tile(reference, (self.solver.horizon+1, 1))
@@ -414,7 +401,7 @@ class Controller:
         for i in range(num_steps):
             additional_random_parameters = self.sampler.sample_input_sequence(self.solver.master_key)
             samples,costs, gradients = self.solver.compute_control_mppi(state, reference, best_control_vars, additional_random_parameters, gains)
-            best_control_vars = self.sampler.update(samples,costs)
+            best_control_vars = self.sampler.update(samples,costs,state)
             self.gains_obj.cur_gains = self.gains_obj.gains_computation(samples, gradients)
             self.solver._update_key()
 

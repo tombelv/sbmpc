@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 import jax
 import jax.numpy as jnp
 from sbmpc.settings import Config
+from sbmpc.gp import GaussianProcessSampling
 
 # TODO understand the role of initial_guess and intial_random_parameters and how to initialize best_control_vars at the beggining
 
@@ -40,22 +41,34 @@ class SBS(ABC):
     #    pass
 
     @abstractmethod
-    def update(self, parameters, costs) -> jnp.ndarray:
+    def update(self, parameters, costs, state=None) -> jnp.ndarray:
         pass
 
 
 class CEMSampler(SBS):
-
     def __init__(self,config: Config, model_nu: int) -> None:
         super().__init__(config, model_nu)
+        self.gp = GaussianProcessSampling() # initialise gp
+        self.key = jax.random.PRNGKey(420)
 
     def sample_input_sequence(self, key) -> jnp.ndarray:
-        # Return zero or your logic
-        return jnp.zeros(
-            (self.num_parallel_computations - 1, self.num_control_points, self.model_nu)
-        )
+        additional_random_parameters = self.zero_random_deviations  # random sample
+        sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model_nu)) * self.std_dev # (1999, 5, 4)
+        additional_random_parameters = additional_random_parameters.at[1:, :, :].set(  # skipping the first element of the first dimension
+            sampled_variation_all)
+        return sampled_variation_all
 
-    def update(self,parameters, costs)-> jnp.ndarray:
+    def update(self,parameters, costs, state)-> jnp.ndarray: # keep update step the same for now
+        x,y,z = parameters.shape
+        parameters = jnp.reshape(parameters, (x,y*z))
+        state = jnp.tile(state,(x,1))
+        flat_params = jnp.concatenate([state,parameters], axis=1)  # reshape parameters into shape that the model is expecting for predicction- (25,4) -> (113)
+        
+        self.gp.get_target_dist(flat_params) # skew params - weight with GP prob P
+        samples = self.gp.hmc_sampling() # sample from skewed distribution
+        optimal_control_vars = samples[-1,:,:] # get the end of the chain only - should be the best..
+        
+        self.best_control_vars = optimal_control_vars
         return self.best_control_vars
 
 class MPPISampler(SBS):
@@ -63,25 +76,27 @@ class MPPISampler(SBS):
     def __init__(self, config: Config, model_nu: int) -> None:
         super().__init__(config, model_nu)
         
-       
     def sample_input_sequence(self, key) -> jnp.ndarray:
         # Generate random parameters
         # The first control parameters is the old best one, so we add zero noise there
         additional_random_parameters = self.zero_random_deviations
         # One sample is kept equal to the guess
-        sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model_nu)) * self.std_dev
-        additional_random_parameters = additional_random_parameters.at[1:, :, :].set(
+        sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model_nu)) * self.std_dev # (1999, 5, 4)
+        additional_random_parameters = additional_random_parameters.at[1:, :, :].set(  # skipping the first element of the first dimension
             sampled_variation_all)
         return sampled_variation_all
 
-    def update(self,parameters, costs) -> jnp.ndarray:
-        exp_costs = self._exp_costs_shifted(costs, jnp.min(costs))
+    def update(self,parameters, costs, state) -> jnp.ndarray: 
+        # print(f"Parameters shape = {parameters.shape}") # (199,25,4)
+        exp_costs = self._exp_costs_shifted(costs, jnp.min(costs)) # exponent of shifted costs
         denom = jnp.sum(exp_costs)
-        weights = exp_costs / denom
-        weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * parameters
-        optimal_action = self.best_control_vars + jnp.sum(weighted_inputs, axis=0)
+        weights = exp_costs / denom  # average the costs
+        weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * parameters # weight paraemers by their costs 
+        optimal_action = self.best_control_vars + jnp.sum(weighted_inputs, axis=0) # update current best control vars
         #self.best_control_vars = optimal_action
+        print(f"Optimal action shape = {optimal_action.shape}")
         return optimal_action
+    
     
     def _exp_costs_shifted(self, costs, best_cost) -> jnp.ndarray:
         return jnp.exp(- self.lam * (costs - best_cost))

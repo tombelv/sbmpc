@@ -12,7 +12,7 @@ import sbmpc.settings as settings
 from sbmpc.solvers import BaseObjective, SamplingBasedMPC, Controller
 from sbmpc.obstacle_loader import ObstacleLoader
 from typing import Callable, Tuple, Optional, Dict
-from  sbmpc.sampler import SBS,MPPISampler
+from  sbmpc.sampler import SBS,MPPISampler, CEMSampler  
 from  sbmpc.gains import  Gains,MPPIGain
 
 
@@ -110,7 +110,7 @@ class MujocoVisualizer(Visualizer):
         n = self.obsl.n_obstacles
         obs_pos = self.obstacle_ref[iter-1]
         obs_pos = np.reshape(obs_pos, (n,3))
-        for i in range(1,n+1): 
+        for i in range(n): 
             self.mj_model.body_pos[i] = obs_pos[i-1]
 
 def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str, num_iters: int):
@@ -292,6 +292,7 @@ def build_all(config: settings.Config, objective: BaseObjective,
     # here we need to add a paramter in the config to manage the different version of sampler and gains
     solver = SamplingBasedMPC(solver_dynamics_model, objective, config)
     sampler = MPPISampler(config, solver_dynamics_model.nu)
+    sampler = CEMSampler(config, solver_dynamics_model.nu)
     gains = MPPIGain(config, solver_dynamics_model.nu, solver_dynamics_model.nx)
     visualize = config.general.visualize
     visualizer_params = {ROBOT_SCENE_PATH_KEY: config.robot.robot_scene_path}

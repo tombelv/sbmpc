@@ -1,24 +1,23 @@
+
 import jax
 import jax.numpy as jnp
 import gpjax as gpx
 
-import sbmpc.settings as settings
 import numpy as np
 import pandas as pd
 import time
 import httpimport
 
-from sbmpc.solvers import SamplingBasedMPC
-from sbmpc.simulation import build_model_from_config, BgSimulator
-from examples.quadrotor import quadrotor_dynamics
-from examples.quadrotor_obstacles import Objective
+import sbmpc.settings as settings
+# from sbmpc.solvers import SamplingBasedMPC
+# from sbmpc.simulation import build_model_from_config, BgSimulator # addressing cyclic imports - restructure class
+# from examples.quadrotor import quadrotor_dynamics
+# from examples.quadrotor_obstacles import Objective
 from sbmpc.obstacle_loader import ObstacleLoader
+
 from sklearn.metrics import mean_squared_error, r2_score # TODO - check these after optimisation
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-
-from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import DotProduct, WhiteKernel
 
 from jax.scipy.stats import norm, multivariate_normal
 
@@ -44,6 +43,11 @@ class DataSet():
         total_samples = num_steps*num_samples
         
         if make_new:
+            # from sbmpc.solvers import SamplingBasedMPC
+            # from sbmpc.simulation import build_model_from_config, BgSimulator
+            # from examples.quadrotor import quadrotor_dynamics
+            # from examples.quadrotor_obstacles import Objective
+
             trajs = ["circle", "diagonal", "sine"]
             ratios = [0.4,0.4,0.2]
             obs_trajs = [obsl.get_obstacle_trajectory(sim_iters,traj)[:horizon+1] for traj in trajs] 
@@ -159,27 +163,25 @@ class GaussianProcessSampling():
 
     def __init__(self):
         self.key = jax.random.key(456)
-        self.ds = DataSet()
-        self.training_set = None
-        self.test_set = None
         self.n_samples = 1999
         self.P = np.ones((self.n_samples,1,1)) 
-        
+
+        mean = np.float32(0.467)
+        stddev = np.reshape(0.2*jnp.array([0.1, 0.1, 0.1, 0.05]),(4,1)).T
         shape = (self.n_samples, 5, 4)
-        self.mean = np.float32(0.467)
-        self.stddev = np.reshape(0.2*jnp.array([0.1, 0.1, 0.1, 0.05]),(4,1)).T
+
+        ds = DataSet()
+        self.training_set = None
+        self.test_set = None
        
-        # self.mppi_gauss = (jax.random.normal(key=self.key, shape=shape) + self.mean) * self.stddev
-        self.mppi_gauss = (jax.random.normal(key=self.key, shape=shape) + self.mean) 
-        self.flat_mppi_gauss = jax.random.normal(key=self.key, shape=(self.n_samples,113)) + self.mean
+        # self.mppi_gauss = (jax.random.normal(key=self.key, shape=shape) + mean) * tddev
+        self.mppi_gauss = (jax.random.normal(key=self.key, shape=shape) + mean) 
+        self.flat_mppi_gauss = jax.random.normal(key=self.key, shape=(self.n_samples,113)) + mean
         self.target_mean = 0
         self.target_stddev = 1
-
         self.delta = 1 # or think in terms of  1 - delta -> see paper (constraint violation between 0 and n_obstacles)
-          
-    def run(self):
-        X, y = self.ds.create(num_samples=10)
-        
+
+        X, y = ds.create(num_samples=10)
         Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=0.3, random_state=42)
 
         log_ytr = np.log(ytr)
@@ -192,8 +194,6 @@ class GaussianProcessSampling():
         x_scaler = StandardScaler().fit(Xtr)
         scaled_Xtr = x_scaler.transform(Xtr)
         scaled_Xte = x_scaler.transform(Xte)
-
-        # print(f"Xtr = {np.all(np.isnan(scaled_Xtr) == False)}, Xte = {np.all(np.isnan(scaled_Xte) == False)}, ytr = {np.all(np.isnan(scaled_ytr) == False)}, yte = {np.all(np.isnan(scaled_yte) == False)}")
 
         n_train, n_covariates = scaled_Xtr.shape
         kernel = gpx.kernels.RBF(
@@ -210,48 +210,60 @@ class GaussianProcessSampling():
         self.training_set = gpx.Dataset(X=scaled_Xtr, y=scaled_ytr)  
         self.test_set = gpx.Dataset(X=scaled_Xte, y=scaled_yte)
     
-        opt_posterior, history = gpx.fit_scipy(
+        self.opt_posterior, history = gpx.fit_scipy(
         model=posterior,
         objective=lambda p, d: -gpx.objectives.conjugate_mll(p,d),   # vs conjugate loovc and others
         train_data=self.training_set,
         ) 
-        print(history)
-
-        mock_X = jax.random.normal(key=self.key, shape= (self.n_samples,113)) # flat_mppi_gauss
-        mock_Y = jax.random.normal(key=self.key, shape = (self.n_samples,)) # mock contraint terms for the input - will compute in solvers when integrated
+        # print(history)
+    
+    def get_P(self, X):
+        # print(f"X TYPE = {type(X)}")
+        # print(f"{jax.numpy.zeros((1999,5,4)).device}")
+        # X = jax.numpy.array(X)
+        # X = jax.device_put(X, jax.devices()[0])
+        # print(X.device())
         
-        P = self.get_gp_prob(opt_posterior, self.training_set, mock_X, mock_Y) 
-        target_dist = self.mppi_gauss * P
+        # print(f"X type: {type(X)}")
+        # print(f"X device: {X.device() if isinstance(X, jnp.ndarray) else 'Not a JAX array'}")
+        # print(f"self.opt_posterior.predict type: {type(self.opt_posterior.predict)}")
 
-        self.target_mean = jnp.mean(target_dist)
-        self.target_stddev = jnp.std(target_dist)
-
-    def get_gp_prob(self, opt_posterior, training_set, X, Y):
-        latent_dist = opt_posterior.predict(X, train_data=training_set) # get GP prediction for X (Y)
+        latent_dist = self.opt_posterior.predict(X, train_data=self.training_set) # get GP prediction for X
         mean = latent_dist.mean()
         stddev = latent_dist.stddev()
 
         P = norm.cdf(self.delta, loc=mean, scale=stddev) # calc cdf for samples based on predictive mean and stddev, below a set threshold
-        # print(P)
+  
+        return np.reshape(P,(self.n_samples,1,1))    
+          
+    def get_target_dist(self, X): 
+        P = self.get_P(X)   # get probability of observing these samples based on the gp
+        target_dist = X * P
+        self.target_mean = jnp.mean(target_dist)
+        self.target_stddev = jnp.std(target_dist)
 
-        return np.reshape(P,(self.n_samples,1,1))
         
-    def target_pdf(self, params): 
-        return jax.scipy.stats.multivariate_normal.LOGpdf(x=params, mean=self.target_mean, cov=self.target_stddev).sum()  # TODO - compare performance with pdf vs log pdf
+    def target_pdf(self, params):  # target pdf for hmc sampling
+        return jax.scipy.stats.multivariate_normal.logpdf(x=params, mean=self.target_mean, cov=self.target_stddev).sum()
  
-    def hmc(self):
-        params_init = jnp.zeros((5,4))  # determines the sample shape..?
-        start = time.time()
-        chain = hmc.sample(self.key, params_init, self.target_pdf, n_steps=100, n_leapfrog_steps=100, step_size=0.1)
-        end = time.time()
+    def hmc_sampling(self):
+        # params_init = jnp.zeros((1999, 5,4))  
+        # start = time.time()
+        # chain = hmc.sample(self.key, params_init, self.target_pdf, n_steps=100, n_leapfrog_steps=100, step_size=0.1)
+        # end = time.time()
 
-        print(f"HMC took {end - start} ms")
+        params_init = jnp.zeros((25,4))  
+        chain = hmc.sample(self.key, params_init, self.target_pdf, n_steps=100, n_leapfrog_steps=100, step_size=0.1) # try different lengths of chains - consider burn-in
+
+        # print(f"HMC took {end - start} ms")
         # print(chain)
+        print(f"Chain shape = {chain.shape}")
 
         return chain
 
     
-if __name__ == "__main__":
-    gp = GaussianProcessSampling()
-    gp.run()
-    gp.hmc()
+# if __name__ == "__main__":
+#     gp = GaussianProcessSampling()
+#     mock_X = jax.random.normal(key=jax.random.key(456), shape= (1999,113)) 
+#     gp.get_target_dist(mock_X)
+#     gp.hmc_sampling()
