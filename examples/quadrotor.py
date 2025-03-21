@@ -2,6 +2,7 @@ import os
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 import matplotlib.pyplot as plt
 
@@ -15,7 +16,7 @@ os.environ['XLA_FLAGS'] = '--xla_gpu_triton_gemm_any=True'
 # Needed to remove warnings, to be investigated
 jax.config.update("jax_default_matmul_precision", "high")
 
-SCENE_PATH = "examples/bitcraze_crazyflie_2/scene.xml"
+SCENE_PATH = os.path.join(os.path.dirname(__file__), "bitcraze_crazyflie_2/scene.xml")
 
 INPUT_MAX = jnp.array([1, 2.5, 2.5, 2])
 INPUT_MIN = jnp.array([0, -2.5, -2.5, -2])
@@ -98,10 +99,12 @@ class Objective(BaseObjective):
                 1 * ang_vel_err.transpose() @ ang_vel_err)
 
     def constraints(self, state, inputs, reference):
-        return jnp.array([state[0] - 0.3, state[1] - 0.4])
+        return jnp.array([])
 
 
 if __name__ == "__main__":
+
+    save_results = True
 
     robot_config = settings.RobotConfig()
 
@@ -136,6 +139,9 @@ if __name__ == "__main__":
 
     objective = Objective()
 
+    constraints = objective.constraints(np.zeros(q_des.shape, dtype=np.float32), None, None)
+    constraints *= -1
+
     sim = build_all(config, objective,
                     reference,
                     custom_dynamics_fn=quadrotor_dynamics,
@@ -144,6 +150,20 @@ if __name__ == "__main__":
     sim.simulate()
 
     time_vect = config.MPC.dt*jnp.arange(sim.state_traj.shape[0])
+
+    if save_results:
+        traj_arr = sim.state_traj
+        with open("trajectory.npy", "wb") as file_handle:
+            np.save(file_handle, traj_arr)
+        with open("ctrl_input.npy", "wb") as file_handle:
+            np.save(file_handle, sim.input_traj)
+        with open("ref.npy", "wb") as file_handle:
+            np.save(file_handle, sim.const_reference)
+        with open("time_arr.npy", "wb") as file_handle:
+            np.save(file_handle, time_vect)
+        with open("constraints_arr.npy", "wb") as file_handle:
+            np.save(file_handle, constraints)
+
     ax = plt.figure().add_subplot(projection='3d')
     # Plot x-y-z position of the robot
     ax.plot(sim.state_traj[:, 0], sim.state_traj[:, 1], sim.state_traj[:, 2])
