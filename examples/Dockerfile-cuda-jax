@@ -1,0 +1,214 @@
+FROM ubuntu:22.04
+
+# This avoids keyboard interaction when asked for geographic area
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+  && apt-get install -y \
+        build-essential \
+        cmake \
+        cmake-curses-gui \
+        curl \
+        gdb \
+        git \
+        locales \
+        lsb-release \
+        mercurial \
+        python3 \
+        python3-dev \
+        python3-pip \
+        python3-dbg \
+        python3-empy \
+        python3-pip \
+        python3-psutil \
+        python3-venv \
+        software-properties-common \
+        sudo \
+        tzdata \
+        vim \
+        wget \
+        curl \
+        nano \
+        gedit \
+        locate \
+        iputils-ping \
+  && apt-get clean
+
+# Add pip packages
+RUN pip install matplotlib mujoco-mjx "jax[cuda12]"
+
+# Set Locale
+RUN locale-gen en_US en_US.UTF-8 && \
+  update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 && \
+  export LANG=en_US.UTF-8
+
+# Install ROS2 Humble
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg \
+&& echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+RUN apt update \
+ && apt install -y ros-humble-ros-base
+
+
+# Add robotpkg required packages
+RUN apt-get update \
+  && apt-get install -y \
+      bzip2 \
+      libbz2-dev \
+      libssl-dev \
+      libncurses-dev \
+      pax \
+      tar \
+      pkg-config \
+      gcc-avr \
+      avr-libc \
+      libelf-dev \
+      libudev-dev \
+      libusb-1.0-0-dev \
+      gcc-arm-none-eabi \
+      libx11-dev \
+      tcl-dev \
+      tk-dev \
+      x11proto-core-dev \
+      flex \
+      bison \
+      file \
+      autoconf \
+      automake \
+      libeigen3-dev \
+      libtool-bin \
+      libsdl2-dev \
+      libboost-filesystem-dev \
+      libboost-iostreams-dev \
+      libboost-math-dev \
+      libboost-thread-dev \
+      bzip2 \
+      netbase \
+  && apt-get clean
+
+# Add a user with the same user_id as the user outside the container
+# Requires a docker build argument `user_id`
+ARG user_id
+ENV USERNAME=developer
+RUN useradd -U --uid ${user_id} -ms /bin/bash $USERNAME \
+  && echo "$USERNAME:$USERNAME" | chpasswd \
+  && adduser $USERNAME sudo \
+  && echo "$USERNAME ALL=NOPASSWD: ALL" >> /etc/sudoers.d/$USERNAME
+# Commands below run as the developer user
+USER $USERNAME
+# When running a container start in the developer's home folder
+WORKDIR /home/$USERNAME
+
+
+# Some QT-Apps/Gazebo don't not show controls without this
+ENV QT_X11_NO_MITSHM=1
+
+# checking some cuda samples, check your architecture for your card and update the commands
+# https://arnon.dk/matching-sm-architectures-arch-and-gencode-for-various-nvidia-cards/
+# RUN git clone https://github.com/NVIDIA/cuda-samples.git
+# RUN cd cuda-samples/Samples/1_Utilities/deviceQuery && mkdir build && cd build && cmake .. && make
+# RUN sudo cp /home/$USERNAME/cuda-samples/Samples/1_Utilities/deviceQuery/build/deviceQuery /usr/bin/deviceQuery
+# RUN cd cuda-samples/Samples/1_Utilities/bandwidthTest && sed -i 's/set(CMAKE_CUDA_ARCHITECTURES 50 52 60 61 70 72 75 80 86 87 89 90 100 101 120)/set(CMAKE_CUDA_ARCHITECTURES 50 52 60 61 70)/g' CMakeLists.txt && mkdir build && cd build && cmake .. && make
+# RUN sudo cp /home/$USERNAME/cuda-samples/Samples/1_Utilities/bandwidthTest/build/bandwidthTest /usr/bin/bandwidthTest
+
+# Source ROS in .bashrc
+RUN echo 'source /opt/ros/humble/setup.bash' >> .bashrc
+
+# installing gazebo
+# RUN sudo curl -sSL http://get.gazebosim.org | sh
+RUN sudo apt-get update && sudo apt-get install -y libgazebo-dev gazebo
+
+# Create openrobot workspace
+ENV TK3_ROOT=/home/${USERNAME}/tk3
+ENV TK3_OPENROBOTS=${TK3_ROOT}/openrobots
+ENV TK3_ROBOTPKG=${TK3_ROOT}/robotpkg
+ENV TK3_DEVEL=${TK3_ROOT}/devel
+ENV ROBOTPKG_BASE=${TK3_OPENROBOTS}
+RUN mkdir -p ${TK3_ROOT}
+
+# Clone and build robotpkg
+RUN cd ${TK3_ROOT} \
+  && git clone https://git.openrobots.org/robots/robotpkg.git \
+  && cd robotpkg/bootstrap \
+  && ./bootstrap --prefix=${TK3_OPENROBOTS}
+
+# Copy robotpkg config file
+COPY robotpkg.conf.telekyb ${TK3_OPENROBOTS}/etc
+
+# Update robotpkg config file
+RUN cd ${TK3_OPENROBOTS}/etc \
+  && cp robotpkg.conf robotpkg.conf.orig \
+  && cat robotpkg.conf.telekyb >> robotpkg.conf
+
+RUN sudo apt-get install -y python3-nose libpoco-dev libapr1-dev libgpgme-dev liblog4cxx-dev python3-pycryptodome python3-defusedxml python3-gnupg python3-paramiko
+
+
+# Build telekyb3
+RUN cd ${TK3_ROBOTPKG} \
+  && make -j$(nproc) update-telekyb3 
+# Build telekyb3
+RUN cd ${TK3_ROBOTPKG} \
+  && make -j$(nproc) update-genom3
+
+# Build telekyb3
+RUN cd ${TK3_ROBOTPKG} \
+  && make -j$(nproc) update-simulation
+
+# install telekyb3
+ENV GAZEBO_MODEL_PATH=$GAZEBO_MODEL_PATH:$ROBOTPKG_BASE/share/gazebo/models
+ENV GAZEBO_PLUGIN_PATH=$GAZEBO_PLUGIN_PATH:$ROBOTPKG_BASE/lib/gazebo
+ENV PATH=$PATH:$ROBOTPKG_BASE/bin:$ROBOTPKG_BASE/sbin
+ENV PYTHONPATH=$PYTHONPATH:$ROBOTPKG_BASE/lib/python3.10/site-packages
+ENV PKG_CONFIG_PATH=$PKG_CONFIG_PATH:$ROBOTPKG_BASE/lib/pkgconfig
+
+#####
+# Following lines are copied from
+# https://gitlab.com/nvidia/container-images/opengl/-/blob/ubuntu18.04/base/Dockerfile
+# and removed :i386 packages (not found)
+RUN sudo apt-get install -y --no-install-recommends \
+        libxau6  \
+        libxdmcp6 \
+        libxcb1 \
+        libxext6 \
+        libx11-6 && \
+        sudo rm -rf /var/lib/apt/lists/*
+
+# nvidia-container-runtime
+# ENV NVIDIA_VISIBLE_DEVICES \
+#         ${NVIDIA_VISIBLE_DEVICES:-all}
+# ENV NVIDIA_DRIVER_CAPABILITIES \
+#         ${NVIDIA_DRIVER_CAPABILITIES:+$NVIDIA_DRIVER_CAPABILITIES,}graphics,compat32,utility
+
+# RUN echo "/usr/local/nvidia/lib" | sudo tee -a /etc/ld.so.conf.d/nvidia.conf && \
+# echo "/usr/local/nvidia/lib64" | sudo tee -a  /etc/ld.so.conf.d/nvidia.conf
+
+# # https://gitlab.com/nvidia/container-images/opengl/-/blob/ubuntu20.04/NGC-DL-CONTAINER-LICENSE
+# COPY NGC-DL-CONTAINER-LICENSE /
+
+# # Required for non-glvnd setups.
+# ENV LD_LIBRARY_PATH /usr/lib/x86_64-linux-gnu:/usr/lib/i386-linux-gnu${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
+
+#####
+# Copied from
+# https://gitlab.com/nvidia/container-images/opengl/blob/ubuntu20.04/glvnd/devel/Dockerfile
+# and removed :i386 packages (not found)
+RUN sudo apt-get update \
+ && sudo apt-get install -y --no-install-recommends \
+        pkg-config \
+        libglvnd-dev \
+        libgl1-mesa-dev \
+        libegl1-mesa-dev  \
+        libgles2-mesa-dev && \
+        sudo rm -rf /var/lib/apt/lists/*
+
+RUN pip install colcon-common-extensions
+ENV PATH=$PATH:/home/developer/.local/bin
+
+
+COPY sbmpc-0.1.2-py3-none-any.whl /tmp/sbmpc-0.1.2-py3-none-any.whl
+# interpax depends on jax less than or equal to 0.5.0, sbmpc depends on interpax
+# sudo here so it de-installs other versions if needed
+RUN sudo pip install --no-deps /tmp/sbmpc-0.1.2-py3-none-any.whl control interpax jax[cuda12]==0.5.0 jaxlib==0.5.0 jax-cuda12-pjrt==0.5.0 jax-cuda12-plugin==0.5.0
+# RUN sudo python3 -m pip install jax-cuda12-pjrt==0.5.0 jax-cuda12-plugin==0.5.0
+RUN sudo pip install equinox==0.11.11
+CMD ["/bin/bash"]
