@@ -8,4 +8,6 @@ dependencies:
 - cmake 
 - make 
 - ninja
-
+pip:
+  - hatch
+  - hatch-vcs

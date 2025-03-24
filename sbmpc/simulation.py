@@ -9,11 +9,11 @@ import logging
 import traceback
 from sbmpc.model import BaseModel, Model, ModelMjx
 import sbmpc.settings as settings
-from sbmpc.solvers import BaseObjective, SamplingBasedMPC, Controller
+from sbmpc.solvers import BaseObjective, RolloutGenerator, Controller
 from sbmpc.obstacle_loader import ObstacleLoader
 from typing import Callable, Tuple, Optional, Dict
-from  sbmpc.sampler import SBS,MPPISampler, CEMSampler  
-from  sbmpc.gains import  Gains,MPPIGain
+from  sbmpc.sampler import Sampler, MPPISampler, CEMSampler
+from  sbmpc.gains import  Gains, MPPIGain
 
 
 class Visualizer(ABC):
@@ -130,12 +130,12 @@ def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str, num_it
 
 
 class Simulator(ABC):
-    def __init__(self, initial_state, model: BaseModel, solver: SamplingBasedMPC, sampler: SBS, gains : Gains, num_iter=100, visualizer: Optional[Visualizer] = None, obstacles:bool = True):
+    def __init__(self, initial_state, model: BaseModel, rollout_gen: RolloutGenerator, sampler: Sampler, gains : Gains, num_iter=100, visualizer: Optional[Visualizer] = None, obstacles:bool = True):
         self.iter = 0
         self.current_state = initial_state
         self.model = model
-        self.controller = Controller(solver, sampler, gains)
-        self.solver = solver
+        self.controller = Controller(rollout_gen, sampler, gains)
+        self.rollout_gen = rollout_gen
         self.num_iter = num_iter
         self.obstacles = obstacles
 
@@ -180,7 +180,7 @@ class Simulator(ABC):
                         if self.obstacles:
                             self.visualizer.move_obstacles(self.iter)
 
-                        time_until_next_step = self.solver.dt - \
+                        time_until_next_step = self.rollout_gen.dt - \
                             (time.time() - step_start)
                         if time_until_next_step > 0:
                             time.sleep(time_until_next_step)
@@ -223,7 +223,7 @@ class Simulation(Simulator):
         self.input_traj[self.iter, :] = ctrl
 
         # Simulate the dynamics
-        self.current_state = self.model.integrate(self.current_state, ctrl, self.solver.dt)
+        self.current_state = self.model.integrate(self.current_state, ctrl, self.rollout_gen.dt)
         self.state_traj[self.iter + 1,  :] = self.current_state_vec() #[:self.model.nx] # set only qpos and qvel
 
 
@@ -264,8 +264,8 @@ def build_model_and_solver(config: settings.Config, objective: BaseObjective, cu
         raise NotImplementedError
     solver_dynamics_model_setting = config.solver_dynamics
     system, solver_x_init, sim_state_init = build_model_from_config(solver_dynamics_model_setting, config, custom_dynamics_fn)
-    solver = SamplingBasedMPC(system, objective, config)
-    return system, solver
+    rollout_gen = RolloutGenerator(system, objective, config)
+    return system, rollout_gen
 
 def build_all(config: settings.Config, objective: BaseObjective,
               reference: jnp.array,
@@ -290,16 +290,15 @@ def build_all(config: settings.Config, objective: BaseObjective,
         raise NotImplementedError
     # initialize all the controller components
     # here we need to add a paramter in the config to manage the different version of sampler and gains
-    solver = SamplingBasedMPC(solver_dynamics_model, objective, config)
-    sampler = MPPISampler(config, solver_dynamics_model.nu)
-    sampler = CEMSampler(config, solver_dynamics_model.nu)
-    gains = MPPIGain(config, solver_dynamics_model.nu, solver_dynamics_model.nx)
+    rollout_generator = RolloutGenerator(solver_dynamics_model, objective, config)
+    sampler = MPPISampler(config)
+    gains = MPPIGain(config)
     visualize = config.general.visualize
     visualizer_params = {ROBOT_SCENE_PATH_KEY: config.robot.robot_scene_path}
 
     # Setup and run the simulation
     num_iterations = config.sim_iterations
-    sim = Simulation(sim_state_init, sim_dynamics_model, solver,sampler,gains, reference, num_iterations, visualize, visualizer_params, obstacles)
+    sim = Simulation(sim_state_init, sim_dynamics_model, rollout_generator, sampler, gains, reference, num_iterations, visualize, visualizer_params, obstacles)
     
     # dummy for jitting
     input_sequence = sim.controller.command(solver_x_init, reference, False).block_until_ready()

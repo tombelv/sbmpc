@@ -19,3 +19,5 @@ dependencies:
 - control
 - pip:
   - mujoco-mjx
+  - hatch
+  - hatch-vcs

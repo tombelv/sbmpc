@@ -4,12 +4,14 @@ import jax
 import jax.numpy as jnp
 from sbmpc.settings import Config
 
+from functools import partial
+
 class Gains(ABC):
 
-    def __init__(self, config: Config, model_nu, model_nx) -> None:
+    def __init__(self, config: Config) -> None:
         self.compute_gains = config.MPC.gains
         self.lam = config.MPC.lambda_mpc
-        self.cur_gains =  jnp.zeros((model_nu, model_nx))
+        self.cur_gains =  jnp.zeros((config.robot.nu, config.robot.nx))
         
 
     @abstractmethod
@@ -21,10 +23,11 @@ class Gains(ABC):
 
 
 class MPPIGain(Gains):
-    def __init__(self, config: Config,model_nu, model_nx) -> None:
-        super().__init__(config,model_nu, model_nx)
+    def __init__(self, config: Config) -> None:
+        super().__init__(config)
 
-    def gains_computation(self, additional_random_paramenters_clipped, gradients) -> jnp.ndarray:
+    @partial(jax.jit, static_argnums=(0,))
+    def gains_computation(self, costs, samples_delta, gradients) -> jnp.ndarray:
         if self.compute_gains:
             # Compute update for weights
             costs, best_cost, worst_cost = self._sort_and_clip_costs(costs)
@@ -34,7 +37,7 @@ class MPPIGain(Gains):
             weights = exp_costs / denom
             weights_grad_shift = jnp.sum(weights[:, jnp.newaxis] * gradients, axis=0)
             weights_grad = -self.lam * weights[:, jnp.newaxis] * (gradients - weights_grad_shift)
-            gains = jnp.sum(jnp.einsum('bi,bo->bio', weights_grad, additional_random_paramenters_clipped[:, 0, :]), axis=0).T
+            gains = jnp.sum(jnp.einsum('bi,bo->bio', weights_grad, samples_delta[:, 0, :]), axis=0).T
         else:
             # if im not computing the gains i return the initial gains which are all zeros
             gains = self.cur_gains
