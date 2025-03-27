@@ -11,8 +11,6 @@ from abc import ABC, abstractmethod
 
 from sbmpc.filter import cubic_spline
 
-
-
 class BaseObjective(ABC):
     def __init__(self, robot_model=None):
         self.robot_model = robot_model
@@ -236,14 +234,13 @@ class Controller:
         self.gains_obj = gains_obj
            
     def command(self, state, reference, shift_guess=True, num_steps=1):
-
         optimal_samples = self.sampler.optimal_samples
         gains = self.gains_obj.cur_gains
 
         for i in range(num_steps):
             samples_delta = self.sampler.sample_input_sequence(self.sampler.master_key)
             samples, costs, gradients = self.rollout_gen.do_rollout(state, reference, optimal_samples, samples_delta, gains)
-            optimal_samples = self.sampler.update(optimal_samples, samples, costs)
+            optimal_samples = self.sampler.update(optimal_samples, samples, costs, state)
             # update gains
             self.gains_obj.cur_gains = self.gains_obj.gains_computation(costs, samples, gradients)
        
@@ -262,3 +259,50 @@ class Controller:
         optimal_samples_shifted = optimal_samples_shifted.at[-1, :].set(
             optimal_samples_shifted[-2:-1, :].reshape(-1))
         return optimal_samples_shifted
+    
+    @partial(jax.vmap, in_axes=(None, None, None, None, 0), out_axes=(0, 0, 0, 0))
+    def get_rollout(self, initial_state, reference, optimal_samples, samples_delta): # do rollout + rollout all + rollout single
+        cost = 0.0
+        constraint_violation = 0.0
+
+        if self.rollout_gen.config.MPC.smoothing == "Spline":
+            control_vars = optimal_samples[self.rollout_gen.control_spline_grid, :] + samples_delta
+        else:
+            control_vars = optimal_samples + samples_delta
+
+        current_state = initial_state
+        final_state = initial_state
+
+        control_vars = self.rollout_gen.interpolate_control(control_vars)
+
+        for idx in range(self.rollout_gen.horizon):
+            cost += self.rollout_gen.dt * self.rollout_gen.cost_and_constraints(current_state, control_vars[idx, :], reference[idx, :])
+            final_state = self.rollout_gen.model.integrate_rollout_single(current_state, control_vars[idx, :], self.rollout_gen.dt)
+
+            close_to_obs = self.rollout_gen.objective.constraints_not_jit(current_state, control_vars[idx, :], reference[idx, :])
+            # penalties = jnp.sum(jnp.where(dist_from_obs < 0.0, 1.0, 1e-5)) 
+            penalties = jnp.sum(jnp.array(close_to_obs)) + 1e-5 # avoid divide by 0 errors when scaling later
+            # print(f"Penalties = {penalties}")
+            constraint_violation += penalties
+        cost += self.rollout_gen.dt*self.rollout_gen.final_cost_and_constraints(final_state, reference[self.rollout_gen.horizon, :])
+        constraint_violation /= self.rollout_gen.horizon
+        samples_delta_clipped = self.rollout_gen.compute_samples_delta(control_vars, optimal_samples)
+
+        return samples_delta_clipped, cost, initial_state, constraint_violation
+    
+    def get_rollouts(self, state, reference, shift_guess=True, num_steps=1): # command
+        optimal_samples = self.sampler.optimal_samples
+
+        rollouts = []
+        for i in range(num_steps):
+            samples_delta = self.sampler.sample_input_sequence(self.sampler.master_key)
+            samples, costs, initial_state, constraint_violation = self.get_rollout(state, reference, optimal_samples, samples_delta) 
+            optimal_samples = self.sampler.update(optimal_samples, samples, costs, state)
+            rollouts.append([initial_state, samples, constraint_violation])
+
+        if shift_guess:
+            self.sampler.optimal_samples = self._shift_guess(optimal_samples)
+        else:
+            self.sampler.optimal_samples = optimal_samples
+        
+        return rollouts, optimal_samples

@@ -9,6 +9,7 @@ inertial = """<inertial pos="0 0 0"  mass="1.0" fullinertia="0.0031887 0.0032245
 obstacle_path = "examples/bitcraze_crazyflie_2/obstacles.xml"
 scene_path = "examples/bitcraze_crazyflie_2/scene.xml"
 
+'"examples/bitcraze_crazyflie_2/obstacles.xml'
 
 class ObstacleLoader():
     def __init__(self, obstacle_path=obstacle_path, scene_path=scene_path):

@@ -119,9 +119,9 @@ class Objective(BaseObjective):
 
         def too_close(dist): # penalise only if x,y and z are in range
             if all(x < 0 for x in dist):
-                return -1
-            else:
                 return 1
+            else:
+                return 0
             
         dist_from_obs = [too_close(dist) for dist in dist_from_obs]
 

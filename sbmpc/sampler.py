@@ -50,10 +50,10 @@ class Sampler(ABC):
         self.master_key = newkey
 
 class CEMSampler(Sampler):
-    def __init__(self,config: Config, model_nu: int) -> None:
-        super().__init__(config, model_nu)
+    def __init__(self,config: Config) -> None:
+        super().__init__(config)
         self.gp = GaussianProcessSampling() # initialise gp
-        self.key = jax.random.PRNGKey(420)
+        # self.key = jax.random.PRNGKey(420)
 
     @partial(jax.jit, static_argnums=(0,))
     def sample_input_sequence(self, key) -> jnp.ndarray:
@@ -65,14 +65,14 @@ class CEMSampler(Sampler):
 
     @partial(jax.jit, static_argnums=(0,))
     def compute_action(self, initial_guess, samples_delta, costs, states) -> jnp.ndarray:
-        x,y,z = parameters.shape
-        parameters = jnp.reshape(parameters, (x,y*z))
+        x,y,z = samples_delta.shape
+        samples_delta = jnp.reshape(samples_delta, (x,y*z))
         states = jnp.tile(states,(x,1))
-        flat_params = jnp.concatenate([states,parameters], axis=1)  # reshape parameters into shape that the model is expecting for predicction- (25,4) -> (113)
+        flat_samples = jnp.concatenate([states,samples_delta], axis=1)  # reshape parameters into shape that the model is expecting for predicction- (25,4) -> (113)
         
-        self.gp.get_target_dist(flat_params) # skew params - weight with GP prob P
-        samples = self.gp.hmc_sampling() # sample from skewed distribution
-        optimal_control_vars = samples[-1,:,:] # get the end of the chain only - should be the best..
+        # self.gp.get_target_dist(flat_samples) # skew params - weight with GP prob P
+        samples = self.gp.hmc_sampling(flat_samples) # sample from skewed distribution
+        optimal_control_vars = samples[-1,:,:] # get the end of the chain only - should be the best
         
         self.best_control_vars = optimal_control_vars
         return self.best_control_vars
@@ -112,10 +112,3 @@ class MPPISampler(Sampler):
 
     def _exp_costs_shifted(self, costs, best_cost) -> jnp.ndarray:
         return jnp.exp(- self.lam * (costs - best_cost))
-    
-
-        
-
-  
-
-

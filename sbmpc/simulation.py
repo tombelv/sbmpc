@@ -291,7 +291,8 @@ def build_all(config: settings.Config, objective: BaseObjective,
     # initialize all the controller components
     # here we need to add a paramter in the config to manage the different version of sampler and gains
     rollout_generator = RolloutGenerator(solver_dynamics_model, objective, config)
-    sampler = MPPISampler(config)
+    # sampler = MPPISampler(config)
+    sampler = CEMSampler(config)
     gains = MPPIGain(config)
     visualize = config.general.visualize
     visualizer_params = {ROBOT_SCENE_PATH_KEY: config.robot.robot_scene_path}
@@ -306,21 +307,19 @@ def build_all(config: settings.Config, objective: BaseObjective,
     return sim
 
 
-class BgSimulator(Simulator):  # background simulator for generating rollouts 
-    def __init__(self, initial_state, model, controller, reference, num_iter=100, visualizer = None, obstacles = True):
-        super().__init__(initial_state, model, controller, num_iter, visualizer, obstacles)
+class BgSimulator(Simulator):  # background simulator for generating rollouts (not jit compiled)
+    def __init__(self, initial_state, model, rollout_gen, sampler, gains, controller, reference: jnp.array, visualize: bool = False, obstacles:bool = True):
+        super().__init__(initial_state=initial_state, model=model, rollout_gen=rollout_gen, sampler=sampler, gains=gains, visualizer=None, obstacles=obstacles)
         self.reference = reference
 
     def update(self):
         return super().update()
     
-    def run(self): # called from gp.py
+    def run(self): # called from dataset.py. best_control_vars = optimal_samples
         curr_rollouts, best_control_vars = self.controller.get_rollouts(self.current_state_vec(), self.reference, num_steps=1) # call solver with curent state vector
         ctrl = best_control_vars[0, :]
         self.input_traj[self.iter, :] = ctrl
 
-        self.current_state = self.model.integrate(self.current_state, ctrl, self.controller.dt)  # update current state
+        self.current_state = self.model.integrate(self.current_state, ctrl, self.controller.rollout_gen.dt)  # update current state
         self.state_traj[self.iter + 1,  :] = self.current_state_vec()
-
         return curr_rollouts
-    
