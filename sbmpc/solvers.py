@@ -238,9 +238,9 @@ class Controller:
         gains = self.gains_obj.cur_gains
 
         for i in range(num_steps):
-            samples_delta = self.sampler.sample_input_sequence(self.sampler.master_key)
+            samples_delta = self.sampler.sample_input_sequence(self.sampler.master_key, state)
             samples, costs, gradients = self.rollout_gen.do_rollout(state, reference, optimal_samples, samples_delta, gains)
-            optimal_samples = self.sampler.update(optimal_samples, samples, costs, state)
+            optimal_samples = self.sampler.update(optimal_samples, samples, costs)
             # update gains
             self.gains_obj.cur_gains = self.gains_obj.gains_computation(costs, samples, gradients)
        

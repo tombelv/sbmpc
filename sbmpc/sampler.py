@@ -30,9 +30,7 @@ class Sampler(ABC):
         # this is initialized at the first interation
         self.additional_random_samples_clipped = None
 
-        self.master_key = jax.random.PRNGKey(420)
-
-        
+        self.master_key = jax.random.PRNGKey(420) 
 
     @abstractmethod
     def sample_input_sequence(self,key) -> jnp.ndarray:
@@ -42,7 +40,7 @@ class Sampler(ABC):
     #    pass
 
     @abstractmethod
-    def update(self, initial_guess, samples, costs, states) -> jnp.ndarray:
+    def update(self, initial_guess, samples, costs) -> jnp.ndarray:
         pass
 
     def _update_key(self):
@@ -53,47 +51,59 @@ class CEMSampler(Sampler):
     def __init__(self,config: Config) -> None:
         super().__init__(config)
         self.gp = GaussianProcessSampling() # initialise gp
+        self.num_parallel_computations = 500
+        # self.num_parallel_computations = 300
+        self.zero_random_deviations = jnp.zeros((self.num_parallel_computations, self.num_control_points, self.model_nu), dtype=self.dtype_general)
         # self.key = jax.random.PRNGKey(420)
 
     @partial(jax.jit, static_argnums=(0,))
-    def sample_input_sequence(self, key) -> jnp.ndarray:
-        additional_random_parameters = self.zero_random_deviations  # random sample
-        sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model_nu)) * self.std_dev # (1999, 5, 4)
-        additional_random_parameters = additional_random_parameters.at[1:, :, :].set(  # skipping the first element of the first dimension
-            sampled_variation_all)
-        return sampled_variation_all
+    def sample_input_sequence(self, key, state) -> jnp.ndarray: 
+        samples_delta = self.zero_random_deviations
+        sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model_nu)) * self.std_dev # sample from normal gaussian
+        samples_delta = samples_delta.at[1:, :, :].set(sampled_variation_all)  
+
+        # reshape samples for gp prediction expecting for prediction- (25,4) -> (113)
+        flat_samples = jnp.tile(samples_delta, (1,5,1))  # tile control points  - check that this is correct
+        x,y,z = flat_samples.shape
+        flat_samples = jnp.reshape(flat_samples, (x, y*z))   # flatten
+
+        state = jnp.tile(state,(x,1)) # add state for prediction
+        flat_samples = jnp.concatenate([state,flat_samples], axis=1)  
+
+        samples = self.gp.hmc_sampling(flat_samples) # skew samples and sample from skewed distribution with hmc
+        optimal_samples = samples[-self.num_parallel_computations:,:,:] # discarding 'burn-in' samples
+
+        return optimal_samples
 
     @partial(jax.jit, static_argnums=(0,))
-    def compute_action(self, initial_guess, samples_delta, costs, states) -> jnp.ndarray:
-        x,y,z = samples_delta.shape
-        samples_delta = jnp.reshape(samples_delta, (x,y*z))
-        states = jnp.tile(states,(x,1))
-        flat_samples = jnp.concatenate([states,samples_delta], axis=1)  # reshape parameters into shape that the model is expecting for predicction- (25,4) -> (113)
-        
-        # self.gp.get_target_dist(flat_samples) # skew params - weight with GP prob P
-        samples = self.gp.hmc_sampling(flat_samples) # sample from skewed distribution
-        optimal_control_vars = samples[-1,:,:] # get the end of the chain only - should be the best
-        
-        self.best_control_vars = optimal_control_vars
-        return self.best_control_vars
+    def compute_action(self, initial_guess, samples_delta, costs) -> jnp.ndarray:
+        exp_costs = self._exp_costs_shifted(costs, jnp.min(costs))
+        denom = jnp.sum(exp_costs)
+        weights = exp_costs / denom
+        weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * samples_delta
+        optimal_action = initial_guess + jnp.sum(weighted_inputs, axis=0)
+        return optimal_action
     
-    def update(self, initial_guess, samples_delta, costs, states) -> jnp.ndarray:
-        optimal_action = self.compute_action(initial_guess, samples_delta, costs, states)
+    def update(self, initial_guess, samples_delta, costs) -> jnp.ndarray:
+        optimal_action = self.compute_action(initial_guess, samples_delta, costs)
         self._update_key()
         return optimal_action
     
+    def _exp_costs_shifted(self, costs, best_cost) -> jnp.ndarray:
+        return jnp.exp(- self.lam * (costs - best_cost))
 
 class MPPISampler(Sampler):
     def __init__(self, config: Config) -> None:
         super().__init__(config)
         
     @partial(jax.jit, static_argnums=(0,))
-    def sample_input_sequence(self, key) -> jnp.ndarray:
+    def sample_input_sequence(self, key, state) -> jnp.ndarray:  
         # Generate random samples
         samples_delta = self.zero_random_deviations
         # One sample is kept equal to the guess
         sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model_nu)) * self.std_dev
         samples_delta = samples_delta.at[1:, :, :].set(sampled_variation_all)
+
         return sampled_variation_all
 
     @partial(jax.jit, static_argnums=(0,))
@@ -105,8 +115,8 @@ class MPPISampler(Sampler):
         optimal_action = initial_guess + jnp.sum(weighted_inputs, axis=0)
         return optimal_action
     
-    def update(self, initial_guess, samples_delta, costs, states) -> jnp.ndarray:
-        optimal_action = self.compute_action(initial_guess, samples_delta, costs)
+    def update(self, initial_guess, samples_delta, costs) -> jnp.ndarray:
+        optimal_action = self.compute_action(initial_guess, samples_delta)
         self._update_key()
         return optimal_action
 
