@@ -29,7 +29,7 @@ def create_tag_with_annotation(tag_name: str, annotation: str):
 
 
 def build_wheel():
-    result = subprocess.run(['hatch', 'build'], stdout=subprocess.PIPE, check=True)
+    result = subprocess.run([sys.executable, '-m', 'hatch', 'build'], stdout=subprocess.PIPE, check=True)
     out = result.stdout.decode()
     print(out.split("\n")[-2:])
 
