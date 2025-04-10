@@ -1,4 +1,9 @@
+import sys
+
+sys.path.extend(["/home/student/mppi_ws/sbmpc"])
+
 import numpy as np
+import os
 import pinocchio as pin
 from sbmpc.geometry import quat2rotm
 
@@ -26,9 +31,9 @@ def get_traj_stats(trajectory, reference, time_arr, constraints_arr, settle_band
     for i in range(orientation_quat_arr.shape[0]):
         quat_ori = orientation_quat_arr[i, 0:4]
         rot = quat2rotm(quat_ori)
-        euler = pin.rpy.matrixToRpy(np.matrix(rot))
-        orientation_angles.append(euler)
-    orientation_angles = np.array(orientation_angles)
+        # euler = pin.rpy.matrixToRpy(np.matrix(rot))
+        # orientation_angles.append(euler)
+    # orientation_angles = np.array(orientation_angles)
 
     pos_within_band = []
     for i in range(3):
@@ -111,14 +116,14 @@ def get_traj_stats(trajectory, reference, time_arr, constraints_arr, settle_band
         axes[i].plot(time_arr, base_xyz[:, i])
         axes[i].set_ylabel(labels[i])
         axes[i].axhline(reference[i], color="r", label=these_labels[0])
-        axes[i].axhline(reference[i] + settle_band_meters, color="r", linestyle="--")
-        axes[i].axhline(reference[i] - settle_band_meters, color="r", linestyle="--", label=these_labels[1])
+        # axes[i].axhline(reference[i] + settle_band_meters, color="r", linestyle="--")
+        # axes[i].axhline(reference[i] - settle_band_meters, color="r", linestyle="--", label=these_labels[1])
         axes[i].axvline(time_arr[settle_indices[i]], color="g", label=these_labels[2])
         axes[i].axvline(first_overshoots[i], color="b", label=these_labels[3])
     axes[2].set_xlabel("time")
     fig.legend()
     fig.suptitle("Position vs Reference, with Steady State Error Marked")
-    
+    fig.savefig("/home/developer/MPPI_WS/fig.png")
     plt.show()
 
     for i in range(3):
@@ -142,7 +147,11 @@ def get_traj_stats(trajectory, reference, time_arr, constraints_arr, settle_band
 def main():
 
     file_names = ["trajectory.npy", "ctrl_input.npy", "ref.npy", "time_arr.npy", 'constraints_arr.npy']
-    arrays = [np.load(file) for file in file_names]
+
+    in_dir = "/home/developer/MPPI_WS/20hz"
+
+    files = [os.path.join(in_dir, file) for file in file_names]
+    arrays = [np.load(file) for file in files]
 
     metrics = get_traj_stats(arrays[0], arrays[2], arrays[3], arrays[4], settle_band_meters = 0.05, settle_band_heading = np.pi/12, settle_index_increment = 200)
     
