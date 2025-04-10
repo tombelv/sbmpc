@@ -31,7 +31,6 @@ horizon = 25
               
 
 class GaussianProcessSampling(): 
-
     def __init__(self):
         self.key = jax.random.key(456)
         self.n_samples = 500  
@@ -39,7 +38,7 @@ class GaussianProcessSampling():
         self.P = np.ones((self.n_samples,1,1)) 
         self.training_set = None
         self.test_set = None
-        self.delta = 0.5 # or think in terms of  1 - delta -> see paper (constraint violation between 0 and n_obstacles)
+        self.delta = 2.5 # or think in terms of  1 - delta -> see paper (constraint violation between 0 and n_obstacles)
         self.burn_in = 10
 
         total_samples = num_steps * num_samples
@@ -101,27 +100,45 @@ class GaussianProcessSampling():
         return np.reshape(P,(self.n_samples,1,1))    
    
     @partial(jax.jit, static_argnums=(0,)) 
-    def get_target_dist(self, X): 
+    def get_target_dist(self, X, X_original): 
         P = self.get_P(X)   # get probability of observing these samples based on the gp
-        target_dist = X * P
+        target_dist = X_original * P
 
         return target_dist
 
+    @partial(jax.jit, static_argnums=(0,))
+    def ravel_gp(self, X, state):
+        flat_samples = jnp.tile(X, (1,5,1))  # tile control points  - check that this is correct
+        x,y,z = flat_samples.shape
+        flat_samples = jnp.reshape(flat_samples, (x, y*z))   # flatten
+
+        state = jnp.tile(state,(x,1)) # add state for prediction
+        flat_samples = jnp.concatenate([state,flat_samples], axis=1)
+
+        return flat_samples
+
+
     @partial(jax.jit, static_argnums=(0,)) 
-    def hmc_sampling(self, X):
-        target = self.get_target_dist(X)  # define target distribution
+    def sample(self, X,state): 
+        flat_X = self.ravel_gp(X, state) # transform and add state for prediction
+
+        predictive_dist = self.get_P(flat_X) # get GP-based CDF 
+
+        target = X * predictive_dist # multiply distributions to get target
+
         mean = jnp.mean(target)
         stddev = jnp.std(target)
 
         key = jax.random.key(456)
-        params_init = jnp.zeros((5,4))  # initialise control vars - TODO replace with better inital guess
+        params_init = jnp.zeros((5,4))  # initialise control vars - TODO replace with better initial guess
 
         @partial(jax.jit, static_argnums=(0,))
         def target_pdf(params):
             return jax.scipy.stats.multivariate_normal.logpdf(x=params, mean=mean, cov=stddev).sum()
-       
+            # return jax.scipy.stats.t.logpdf(x=params,loc=mean, scale=stddev, df=4).sum()
+            
+        # sample from target with hmc
         chain = hmc.sample(key, params_init, target_pdf, n_steps = (self.burn_in + self.n_samples), n_leapfrog_steps=100, step_size=0.1) # try different lengths of chains - consider burn-in
-        # print(f"Chain shape = {chain.shape}")
         return chain
     
     def sk_gp(self): # from sklearn 
@@ -148,12 +165,6 @@ class GaussianProcessSampling():
 
         # prob = jax.scipy.stats.multivariate_normal.pdf(Xte, mean, cov)  # mean and cov shapes should match the dimensions of X
         # print(f"Prob = {prob} with shape {prob.shape}")
-
-
-
-class NeuralNetworkSampling():
-    def __init__(self):
-        pass
 
 
 if __name__ == "__main__":

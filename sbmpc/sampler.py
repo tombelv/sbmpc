@@ -54,23 +54,14 @@ class CEMSampler(Sampler):
         self.num_parallel_computations = 500
         # self.num_parallel_computations = 300
         self.zero_random_deviations = jnp.zeros((self.num_parallel_computations, self.num_control_points, self.model_nu), dtype=self.dtype_general)
-        # self.key = jax.random.PRNGKey(420)
 
     @partial(jax.jit, static_argnums=(0,))
     def sample_input_sequence(self, key, state) -> jnp.ndarray: 
         samples_delta = self.zero_random_deviations
         sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model_nu)) * self.std_dev # sample from normal gaussian
         samples_delta = samples_delta.at[1:, :, :].set(sampled_variation_all)  
-
-        # reshape samples for gp prediction expecting for prediction- (25,4) -> (113)
-        flat_samples = jnp.tile(samples_delta, (1,5,1))  # tile control points  - check that this is correct
-        x,y,z = flat_samples.shape
-        flat_samples = jnp.reshape(flat_samples, (x, y*z))   # flatten
-
-        state = jnp.tile(state,(x,1)) # add state for prediction
-        flat_samples = jnp.concatenate([state,flat_samples], axis=1)  
-
-        samples = self.gp.hmc_sampling(flat_samples) # skew samples and sample from skewed distribution with hmc
+ 
+        samples = self.gp.sample(samples_delta,state) # skew sampling distribution and sample with hmc
         optimal_samples = samples[-self.num_parallel_computations:,:,:] # discarding 'burn-in' samples
 
         return optimal_samples
