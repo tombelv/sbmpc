@@ -121,7 +121,7 @@ class ObstacleLoader():
                 ang += step
 
         else:  
-            pass   # if no valid funtion selected then keep obstacles stationary
+            traj  = np.tile(self.obs_pos,(iters,1))   # if no valid funtion selected then keep obstacles stationary
 
         traj = np.reshape(traj, (iters,n*3))
         return traj

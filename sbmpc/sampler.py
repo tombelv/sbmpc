@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import jax
 import jax.numpy as jnp
 from sbmpc.settings import Config
-from sbmpc.gp import GaussianProcessSampling, BNNSampling
+from sbmpc.sampler_models import GaussianProcessSampling, BNNSampling
 
 from functools import partial
 
@@ -50,7 +50,7 @@ class Sampler(ABC):
 class GPSampler(Sampler):
     def __init__(self,config: Config) -> None:
         super().__init__(config)
-        self.gp = GaussianProcessSampling() # initialise gp
+        self.model = GaussianProcessSampling() # initialise gp
         self.num_parallel_computations = 500
         # self.num_parallel_computations = 300
         self.zero_random_deviations = jnp.zeros((self.num_parallel_computations, self.num_control_points, self.model_nu), dtype=self.dtype_general)
@@ -61,7 +61,7 @@ class GPSampler(Sampler):
         sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model_nu)) * self.std_dev # sample from normal gaussian
         samples_delta = samples_delta.at[1:, :, :].set(sampled_variation_all)  
  
-        samples = self.gp.sample(samples_delta,state) # skew sampling distribution and sample with hmc
+        samples = self.model.sample(samples_delta,state) # skew sampling distribution and sample with hmc
         optimal_samples = samples[-self.num_parallel_computations:,:,:] # discarding 'burn-in' samples
 
         return optimal_samples
@@ -87,7 +87,7 @@ class GPSampler(Sampler):
 class BNNSampler(Sampler):
     def __init__(self,config: Config) -> None:
         super().__init__(config)
-        self.bnn = BNNSampling() 
+        self.model = BNNSampling() 
         self.num_parallel_computations = 500
         self.zero_random_deviations = jnp.zeros((self.num_parallel_computations, self.num_control_points, self.model_nu), dtype=self.dtype_general)
 
@@ -97,7 +97,7 @@ class BNNSampler(Sampler):
         sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model_nu)) * self.std_dev # sample from normal gaussian
         samples_delta = samples_delta.at[1:, :, :].set(sampled_variation_all)  
  
-        samples = self.bnn.sample(samples_delta,state) # skew sampling distribution and sample with hmc
+        samples = self.model.sample(samples_delta,state) # skew sampling distribution and sample with hmc
         optimal_samples = samples[-self.num_parallel_computations:,:,:] # discarding 'burn-in' samples
         return optimal_samples
 

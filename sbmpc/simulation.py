@@ -111,7 +111,7 @@ class MujocoVisualizer(Visualizer):
         obs_pos = self.obstacle_ref[iter-1]
         obs_pos = np.reshape(obs_pos, (n,3))
         for i in range(n): 
-            self.mj_model.body_pos[i] = obs_pos[i-1]
+            self.mj_model.body_pos[i+1] = obs_pos[i-1]
 
 def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str, num_iters: int):
     mj_model, mj_data = (None, None)
@@ -270,7 +270,7 @@ def build_model_and_solver(config: settings.Config, objective: BaseObjective, cu
 def build_all(config: settings.Config, objective: BaseObjective,
               reference: jnp.array,
               custom_dynamics_fn: Optional[Callable] = None, 
-              obstacles: bool = True):
+              obstacles: bool = True, sampler: Sampler = None):
     system, x_init, state_init = (None, None, None)
     solver_dynamics_model_setting = config.solver_dynamics
     sim_dynamics_model_setting = config.sim_dynamics
@@ -291,7 +291,8 @@ def build_all(config: settings.Config, objective: BaseObjective,
     # initialize all the controller components
     # here we need to add a paramter in the config to manage the different version of sampler and gains
     rollout_generator = RolloutGenerator(solver_dynamics_model, objective, config)
-    sampler = MPPISampler(config)
+    if (sampler == None):
+        sampler = MPPISampler(config)
     # sampler = GPSampler(config)
     # sampler = BNNSampler(config)
     gains = MPPIGain(config)
