@@ -12,7 +12,7 @@ import sbmpc.settings as settings
 from sbmpc.solvers import BaseObjective, RolloutGenerator, Controller
 from sbmpc.obstacle_loader import ObstacleLoader
 from typing import Callable, Tuple, Optional, Dict
-from  sbmpc.sampler import Sampler, MPPISampler, CEMSampler
+from  sbmpc.sampler import Sampler, MPPISampler, GPSampler, BNNSampler
 from  sbmpc.gains import  Gains, MPPIGain
 
 
@@ -291,8 +291,9 @@ def build_all(config: settings.Config, objective: BaseObjective,
     # initialize all the controller components
     # here we need to add a paramter in the config to manage the different version of sampler and gains
     rollout_generator = RolloutGenerator(solver_dynamics_model, objective, config)
-    # sampler = MPPISampler(config)
-    sampler = CEMSampler(config)
+    sampler = MPPISampler(config)
+    # sampler = GPSampler(config)
+    # sampler = BNNSampler(config)
     gains = MPPIGain(config)
     visualize = config.general.visualize
     visualizer_params = {ROBOT_SCENE_PATH_KEY: config.robot.robot_scene_path}
