@@ -27,7 +27,7 @@ class ObstacleLoader():
         self.model = mujoco.MjModel.from_xml_path(scene_path) 
         self.data = mujoco.MjData(self.model)
 
-        self.n_obstacles = 3
+        self.n_obstacles = 3 # default
 
 
     def create_obstacles(self,obstacle_type=basic_sphere):

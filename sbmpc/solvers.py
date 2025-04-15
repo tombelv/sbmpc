@@ -280,10 +280,9 @@ class Controller:
             final_state = self.rollout_gen.model.integrate_rollout_single(current_state, control_vars[idx, :], self.rollout_gen.dt)
 
             close_to_obs = self.rollout_gen.objective.constraints_not_jit(current_state, control_vars[idx, :], reference[idx, :])
-            # penalties = jnp.sum(jnp.where(dist_from_obs < 0.0, 1.0, 1e-5)) 
             penalties = jnp.sum(jnp.array(close_to_obs)) + 1e-5 # avoid divide by 0 errors when scaling later
-            # print(f"Penalties = {penalties}")
             constraint_violation += penalties
+            
         cost += self.rollout_gen.dt*self.rollout_gen.final_cost_and_constraints(final_state, reference[self.rollout_gen.horizon, :])
         constraint_violation /= self.rollout_gen.horizon
         samples_delta_clipped = self.rollout_gen.compute_samples_delta(control_vars, optimal_samples)

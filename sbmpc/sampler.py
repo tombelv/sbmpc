@@ -1,14 +1,14 @@
-
 from abc import ABC, abstractmethod
 import jax
+import jax.experimental
 import jax.numpy as jnp
 from sbmpc.settings import Config
 from sbmpc.sampler_models import GaussianProcessSampling, BNNSampling
 
 from functools import partial
+import numpy as np
 
 class Sampler(ABC):
-
     def __init__(self, config: Config) -> None:
         # Initialize the vector storing the current optimal input sequence
         self.horizon = config.MPC.horizon
@@ -29,7 +29,6 @@ class Sampler(ABC):
 
         # this is initialized at the first interation
         self.additional_random_samples_clipped = None
-
         self.master_key = jax.random.PRNGKey(420) 
 
     @abstractmethod
@@ -47,13 +46,20 @@ class Sampler(ABC):
         newkey, subkey = jax.random.split(self.master_key)
         self.master_key = newkey
 
+    def write(self,num_rej):
+        self.num_sample_rejections.append(num_rej)
+        f = open("/home/ubuntu/sbmpc/experiments/sample_rejections.txt", "w")
+        f.write(str(np.array(self.num_sample_rejections)))
+        f.close()
+        return num_rej
+    
+
 class GPSampler(Sampler):
     def __init__(self,config: Config) -> None:
         super().__init__(config)
-        self.model = GaussianProcessSampling() # initialise gp
-        self.num_parallel_computations = 500
-        # self.num_parallel_computations = 300
+        self.model = GaussianProcessSampling(self.num_parallel_computations) # initialise gp
         self.zero_random_deviations = jnp.zeros((self.num_parallel_computations, self.num_control_points, self.model_nu), dtype=self.dtype_general)
+        self.num_sample_rejections = []
 
     @partial(jax.jit, static_argnums=(0,))
     def sample_input_sequence(self, key, state) -> jnp.ndarray: 
@@ -63,7 +69,6 @@ class GPSampler(Sampler):
  
         samples = self.model.sample(samples_delta,state) # skew sampling distribution and sample with hmc
         optimal_samples = samples[-self.num_parallel_computations:,:,:] # discarding 'burn-in' samples
-
         return optimal_samples
 
     @partial(jax.jit, static_argnums=(0,))
@@ -73,6 +78,9 @@ class GPSampler(Sampler):
         weights = exp_costs / denom
         weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * samples_delta
         optimal_action = initial_guess + jnp.sum(weighted_inputs, axis=0)
+        
+        jax.experimental.io_callback(callback=self.write, num_rej=jnp.sum(jnp.where(weights <= 0, 1, 0)), 
+                                     result_shape_dtypes=jax.ShapeDtypeStruct(shape=(), dtype=jnp.int32)) # record rejection rate
         return optimal_action
     
     def update(self, initial_guess, samples_delta, costs) -> jnp.ndarray:
@@ -87,10 +95,10 @@ class GPSampler(Sampler):
 class BNNSampler(Sampler):
     def __init__(self,config: Config) -> None:
         super().__init__(config)
-        self.model = BNNSampling() 
-        self.num_parallel_computations = 500
+        self.model = BNNSampling(self.num_parallel_computations) 
         self.zero_random_deviations = jnp.zeros((self.num_parallel_computations, self.num_control_points, self.model_nu), dtype=self.dtype_general)
-
+        self.num_sample_rejections = []
+        
     @partial(jax.jit, static_argnums=(0,))
     def sample_input_sequence(self, key, state) -> jnp.ndarray: 
         samples_delta = self.zero_random_deviations
@@ -107,7 +115,10 @@ class BNNSampler(Sampler):
         denom = jnp.sum(exp_costs)
         weights = exp_costs / denom
         weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * samples_delta
-        optimal_action = initial_guess + jnp.sum(weighted_inputs, axis=0)
+        optimal_action = initial_guess + jnp.sum(weighted_inputs, axis=0) 
+
+        jax.experimental.io_callback(callback=self.write, num_rej=jnp.sum(jnp.where(weights <= 0, 1, 0)), 
+                                     result_shape_dtypes=jax.ShapeDtypeStruct(shape=(), dtype=jnp.int32)) # record rejection rate
         return optimal_action
     
     def update(self, initial_guess, samples_delta, costs) -> jnp.ndarray:
@@ -122,6 +133,8 @@ class BNNSampler(Sampler):
 class MPPISampler(Sampler):
     def __init__(self, config: Config) -> None:
         super().__init__(config)
+        self.f = None
+        self.num_sample_rejections = []
         
     @partial(jax.jit, static_argnums=(0,))
     def sample_input_sequence(self, key, state) -> jnp.ndarray:  
@@ -138,6 +151,10 @@ class MPPISampler(Sampler):
         exp_costs = self._exp_costs_shifted(costs, jnp.min(costs))
         denom = jnp.sum(exp_costs)
         weights = exp_costs / denom
+
+        jax.experimental.io_callback(callback=self.write, num_rej=jnp.sum(jnp.where(weights <= 0, 1, 0)), 
+                                     result_shape_dtypes=jax.ShapeDtypeStruct(shape=(), dtype=jnp.int32)) # record rejection rate
+
         weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * samples_delta
         optimal_action = initial_guess + jnp.sum(weighted_inputs, axis=0)
         return optimal_action
@@ -149,3 +166,4 @@ class MPPISampler(Sampler):
 
     def _exp_costs_shifted(self, costs, best_cost) -> jnp.ndarray:
         return jnp.exp(- self.lam * (costs - best_cost))
+    

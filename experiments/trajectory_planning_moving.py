@@ -3,18 +3,22 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import sbmpc.settings as settings
+import time
+import numpy as np
 
 from sbmpc import BaseObjective
 from sbmpc.simulation import build_all
 from sbmpc.geometry import skew, quat_product, quat2rotm, quat_inverse
 from sbmpc.obstacle_loader import ObstacleLoader
-from  sbmpc.sampler import Sampler, MPPISampler, GPSampler, BNNSampler
+from sbmpc.sampler import Sampler, MPPISampler, GPSampler, BNNSampler
+from experiments import utils
+
 
 os.environ['XLA_FLAGS'] = '--xla_gpu_triton_gemm_any=True'
-# Needed to remove warnings, to be investigated
 jax.config.update("jax_default_matmul_precision", "high")
 
 SCENE_PATH = "examples/bitcraze_crazyflie_2/scene.xml"
+RESULTS_PATH = "experiments/results/trajectory_planning_moving/"
 
 INPUT_MAX = jnp.array([1, 2.5, 2.5, 2])
 INPUT_MIN = jnp.array([0, -2.5, -2.5, -2])
@@ -30,25 +34,9 @@ SPATIAL_INTERTIA_MAT_INV = jnp.linalg.inv(SPATIAL_INTERTIA_MAT)
 INPUT_HOVER = jnp.array([MASS*GRAVITY, 0., 0., 0.], dtype=jnp.float32)
 obsl = ObstacleLoader()
 
+
 @jax.jit
 def quadrotor_dynamics(state: jnp.array, inputs: jnp.array, params: jnp.array) -> jnp.array:
-    """
-    Simple quadrotor dynamics model with CoM placed at the geometric center
-
-    Parameters
-    ----------
-    state : jnp.array
-        state vector [pos (world frame),
-                      attitude (unit quaternion [w, x, y, z]),
-                      vel (world frame),
-                      angular_velocity (body frame)]
-    inputs : jnp.array):
-        input vector [thrust (along the body-frame z axis), torque (body frame)]
-    Returns
-    -------
-    state_dot :jnp.array
-        time derivative of state with given inputs
-    """
 
     quat = state[3:7]
     ang_vel = state[10:13]
@@ -123,13 +111,73 @@ class Objective(BaseObjective):
         dist_from_obs = [too_close(dist) for dist in dist_from_obs]
 
         return dist_from_obs 
+def avg_dist_from_obs(state_traj, obs_ref, n_obs):
+        print(f"State shape = {state_traj.shape} and ref shape = {obs_ref.shape}")
+        r = 0.05            
+        n_iters = 500                     
 
-    # def constraints(self, state, inputs, reference):
-    #     return jnp.array([state[0] - 0.3, state[1] - 0.4])
+        total_dist = 0
+        for i in range(n_iters):
+            curr_pos = state_traj[i]
+            curr_obs_pos = obs_ref[i]
+            for obs in curr_obs_pos:
+                total_dist += jnp.sum(abs(curr_pos - obs) - r) 
 
+        avg_dist = ((total_dist)/n_iters)/n_obs
+        return avg_dist
+
+def num_collisions(state_traj, obs_ref):
+        r = 0.05      
+        n_iters = 500
+       
+        def too_close(dist): # penalise only if x,y and z are in range
+            if all(x < 0 for x in dist):
+                return 1
+            else:
+                return 0
+            
+        num_collisions = 0    
+        for i in range(n_iters):
+            curr_pos = state_traj[i]
+            curr_obs_pos = jnp.reshape(obs_ref[i],(3,3))
+            # print(curr_pos.shape)
+            # print(curr_obs_pos[0].shape)
+            dist_from_obs = jnp.array([(abs(curr_pos - obs) - r) for obs in curr_obs_pos]) 
+            num_collisions += np.sum([too_close(dist) for dist in dist_from_obs])
+        
+        return (num_collisions/n_iters)
+
+def get_simulation_results(sampler):
+        sim = build_all(config, objective,
+                        reference,
+                        custom_dynamics_fn=quadrotor_dynamics,sampler=sampler)
+
+        start = time.time()
+        sim.simulate()   # start simulation
+        end = time.time()
+    
+        duration = end - start 
+
+        smoothness = utils.get_smoothness(sim.state_traj)
+        obstacle_dist = avg_dist_from_obs(sim.state_traj[:, 0:3], full_traj, 3)
+        n_collisions = num_collisions(sim.state_traj[:, 0:3], full_traj)
+        
+        with open("experiments/sample_rejections.txt", "r") as file:
+            data = file.read()
+
+        sample_rejections = np.fromstring(data.strip("[]"), sep=" ", dtype=int) 
+        rejection_rate = np.mean(sample_rejections)  # calculate rejection rate
+
+        with open("experiments/computation_time.txt", "r") as file:
+            data = file.read()
+        
+        computation_times = np.fromstring(data.strip("[]"), sep=" ", dtype=int)
+        avg_comp_time = np.mean(computation_times)  # calculate average computation time
+
+        return duration, avg_comp_time, smoothness, rejection_rate, obstacle_dist, n_collisions
 
 if __name__ == "__main__":
-    obsl.n_obstacles = 5
+    obsl.n_obstacles = 3
     obsl.create_obstacles()
     obsl.load_obstacles()
 
@@ -149,7 +197,6 @@ if __name__ == "__main__":
     config.MPC.dt = 0.02
     config.MPC.horizon = 25
     config.MPC.std_dev_mppi = 0.2*jnp.array([0.1, 0.1, 0.1, 0.05])
-    config.MPC.num_parallel_computations = 2000
     config.MPC.initial_guess = INPUT_HOVER
     config.MPC.lambda_mpc = 50.0
     config.MPC.smoothing = "Spline"
@@ -159,41 +206,54 @@ if __name__ == "__main__":
     config.solver_dynamics = settings.DynamicsModel.CUSTOM
     config.sim_dynamics = settings.DynamicsModel.MJX
 
-    # x_init = jnp.concatenate([robot_config[settings.ROBOT_Q_INIT_KEY],
-    #                  jnp.zeros(robot_config[settings.ROBOT_NV_KEY], dtype=jnp.float32)], axis=0)
-    # reference = jnp.concatenate((x_init, INPUT_HOVER))
-
     q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
     x_des = jnp.concatenate([q_des, jnp.zeros(robot_config.nv, dtype=jnp.float32)], axis=0)
 
     horizon = config.MPC.horizon+1
-    traj = obsl.get_obstacle_trajectory(config.sim_iterations,"circle")[:horizon] 
+    full_traj = obsl.get_obstacle_trajectory(config.sim_iterations,"circle")
+    traj = full_traj[:horizon]  # disable obstacle movement
 
     reference = jnp.concatenate((x_des, INPUT_HOVER))  
     reference = jnp.tile(reference, (horizon, 1))
     reference = jnp.concatenate([reference, traj],axis=1)
-    print(traj)
 
+    sample_sizes = [100, 250, 500, 750, 1000, 1250, 1500]
     objective = Objective()
 
-    sim = build_all(config, objective,
-                    reference,
-                    custom_dynamics_fn=quadrotor_dynamics)
+    for n in sample_sizes: # TODO - set n_obstacles to 3 on simiulation line 72 and on line 143 here!!
+        config.MPC.num_parallel_computations = n # set sample size
+        mppi = MPPISampler(config) 
+        duration_mppi, avg_comp_time_mppi, smoothness_mppi, rej_rate_mppi, obs_dist_mppi, num_collisions_mppi = get_simulation_results(mppi)
 
-    sim.simulate() 
+        gp = GPSampler(config)
+        duration_gp, avg_comp_time_gp, smoothness_gp, rej_rate_gp, obs_dist_gp, num_collisions_gp = get_simulation_results(gp)
+
+        bnn = BNNSampler(config)
+        duration_bnn, avg_comp_time_bnn, smoothness_bnn, rej_rate_bnn, obs_dist_bnn, num_collisions_bnn  = get_simulation_results(bnn)
+
+        with (open(RESULTS_PATH + "average computation time.csv", "a")) as f:  # record results
+            f.write(f"\n{n},{avg_comp_time_mppi},{avg_comp_time_gp},{avg_comp_time_bnn}")
+            f.close()
+
+        with (open(RESULTS_PATH + "total duration.csv", "a")) as f:
+            f.write(f"\n{n},{duration_mppi},{duration_gp},{duration_bnn}")
+            f.close()
+
+        with (open(RESULTS_PATH + "smoothness.csv", "a")) as f:
+            f.write(f"\n{n},{smoothness_mppi},{smoothness_gp},{smoothness_bnn}")
+            f.close()
+
+        with (open(RESULTS_PATH + "rejection rate.csv", "a")) as f:
+            f.write(f"\n{n},{rej_rate_mppi},{rej_rate_gp},{rej_rate_bnn}")
+            f.close()
+
+        with (open(RESULTS_PATH + "average obstacle dist.csv", "a")) as f:
+            f.write(f"\n{n},{obs_dist_mppi},{obs_dist_gp},{obs_dist_bnn}")
+            f.close()
+
+        with (open(RESULTS_PATH + "num collisions.csv", "a")) as f:
+            f.write(f"\n{n},{num_collisions_mppi},{num_collisions_gp},{num_collisions_bnn}")
+            f.close()
+
     obsl.reset_xmls()
  
-    time_vect = config.MPC.dt*jnp.arange(sim.state_traj.shape[0])
-    ax = plt.figure().add_subplot(projection='3d')
-    # Plot x-y-z position of the robot
-    ax.plot(sim.state_traj[:, 0], sim.state_traj[:, 1], sim.state_traj[:, 2])
-    plt.show()
-    plt.plot(time_vect, sim.state_traj[:, 0:3])
-    plt.legend(["x", "y", "z"])
-    plt.grid()
-    plt.show()
-    # Plot the input trajectory
-    plt.plot(time_vect[:-1], sim.input_traj)
-    plt.legend(["F", "t_x", "t_y", "t_z"])
-    plt.grid()
-    plt.show()

@@ -70,6 +70,8 @@ class MujocoVisualizer(Visualizer):
                                                    show_right_ui=show_right_ui,
                                                    key_callback=self.key_callback)
         self.obsl = ObstacleLoader()
+        # self.obsl.n_obstacles = 5
+        self.obsl.n_obstacles = 3
         self.obstacle_ref = self.obsl.get_obstacle_trajectory(num_iters, function="circle")
 
     def key_callback(self, keycode):
@@ -212,6 +214,7 @@ class Simulation(Simulator):
             visualizer = construct_mj_visualizer_from_model(model, scene_path=scene_path, num_iters=num_iterations)
 
         super().__init__(initial_state, model, controller,sampler,gains, num_iterations, visualizer, obstacles)
+        self.computation_times = [] # in milliseconds
 
     def update(self):
         # Compute the optimal input sequence
@@ -220,11 +223,19 @@ class Simulation(Simulator):
         ctrl = input_sequence[0, :].block_until_ready()
         print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
 
+        self.computation_times.append((1e-6 * (time.time_ns() - time_start)))
+        self.write()
+
         self.input_traj[self.iter, :] = ctrl
 
         # Simulate the dynamics
         self.current_state = self.model.integrate(self.current_state, ctrl, self.rollout_gen.dt)
         self.state_traj[self.iter + 1,  :] = self.current_state_vec() #[:self.model.nx] # set only qpos and qvel
+    
+    def write(self):
+        f = open("/home/ubuntu/sbmpc/experiments/computation_time.txt", "w")
+        f.write(str(np.array(self.computation_times)))
+        f.close()
 
 
 def build_custom_model(custom_dynamics_fn: Callable, nq: int, nv: int, nu: int, input_min: jnp.array, input_max: jnp.array,

@@ -1,0 +1,8 @@
+﻿Num samples,Avg. Computation Time MPPI,Avg. Computation Time GP,Avg. Computation Time BNN
+100,30.0,69.0,25.0
+250,22.0,90.0,22.0
+500,24.0,141.0,52.0
+750,28.0,249.0,30.0
+1000,29.0,391.0,38.0
+1250,32.0,656.0,38.0
+1500,32.0,826.0,43.0
