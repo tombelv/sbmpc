@@ -41,7 +41,8 @@ class GaussianProcessSampling():
         self.P = np.ones((self.n_samples,1,1)) 
         self.training_set = None
         self.test_set = None
-        self.delta = 0.5 # or think in terms of  1 - delta -> see paper (constraint violation between 0 and n_obstacles)
+        # self.delta = 0.3 # or think in terms of  1 - delta -> see paper (constraint violation between 0 and n_obstacles)
+        self.delta = 0.5
         self.burn_in = 10
 
         total_samples = num_steps * num_samples
@@ -164,7 +165,8 @@ class BNNSampling():
         scaled_Xtr = x_scaler.transform(Xtr)
         scaled_Xte = x_scaler.transform(Xte)
 
-        self.delta = 1
+        # self.delta = 0.3
+        self.delta = 0.5
         self.burn_in = 10
         self.n_samples = n_samples
 

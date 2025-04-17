@@ -145,7 +145,7 @@ def num_collisions(state_traj, obs_ref):
             dist_from_obs = jnp.array([(abs(curr_pos - obs) - r) for obs in curr_obs_pos]) 
             num_collisions += np.sum([too_close(dist) for dist in dist_from_obs])
         
-        return (num_collisions/n_iters)
+        return num_collisions
 
 def get_simulation_results(sampler):
         sim = build_all(config, objective,
@@ -211,7 +211,7 @@ if __name__ == "__main__":
 
     horizon = config.MPC.horizon+1
     full_traj = obsl.get_obstacle_trajectory(config.sim_iterations,"circle")
-    traj = full_traj[:horizon]  # disable obstacle movement
+    traj = full_traj[:horizon]  
 
     reference = jnp.concatenate((x_des, INPUT_HOVER))  
     reference = jnp.tile(reference, (horizon, 1))

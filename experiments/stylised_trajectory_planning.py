@@ -118,7 +118,6 @@ class Objective(BaseObjective):
         return dist_from_obs 
 
 def avg_dist_from_obs(state_traj, obs_ref, n_obs):
-        print(f"State shape = {state_traj.shape} and ref shape = {obs_ref.shape}")
         r = 0.05            
         n_iters = 500                     
 
@@ -151,7 +150,7 @@ def num_collisions(state_traj, obs_ref):
             dist_from_obs = jnp.array([(abs(curr_pos - obs) - r) for obs in curr_obs_pos]) 
             num_collisions += np.sum([too_close(dist) for dist in dist_from_obs])
         
-        return (num_collisions/n_iters)
+        return num_collisions
 
 
 def get_simulation_results(sampler, model, delta):
@@ -170,9 +169,13 @@ def get_simulation_results(sampler, model, delta):
         obstacle_dist = avg_dist_from_obs(sim.state_traj[:, 0:3], full_traj, 3)
         n_collisions = num_collisions(sim.state_traj[:, 0:3], full_traj)
         
-        time_vect = config.MPC.dt*jnp.arange(sim.state_traj.shape[0])
+        # time_vect = config.MPC.dt*jnp.arange(sim.state_traj.shape[0])
+        time_vect = config.MPC.dt*jnp.arange(501)
 
         plt.plot(time_vect, sim.state_traj[:, 0:3])# plot the trajectory
+        plt.xlabel("Time (s)")
+        plt.ylabel("Position (m)")
+        plt.title(f"Quadrotor Trajectory {model} Sampler")
         plt.legend(["x", "y", "z"])
         plt.grid()
         # plt.show()
@@ -184,6 +187,7 @@ def get_simulation_results(sampler, model, delta):
 
 
 if __name__ == "__main__":
+    obsl.n_obstacles = 3
     obsl.create_obstacles()
     obsl.load_obstacles()
 
@@ -216,15 +220,16 @@ if __name__ == "__main__":
     x_des = jnp.concatenate([q_des, jnp.zeros(robot_config.nv, dtype=jnp.float32)], axis=0)
 
     horizon = config.MPC.horizon+1
-    full_traj = obsl.get_obstacle_trajectory(config.sim_iterations,"stationary")
+    full_traj = obsl.get_obstacle_trajectory(config.sim_iterations,"circle")
     traj = full_traj[:horizon]  # disable obstacle movement
 
     reference = jnp.concatenate((x_des, INPUT_HOVER))  
     reference = jnp.tile(reference, (horizon, 1))
     reference = jnp.concatenate([reference, traj],axis=1)
 
-    deltas = [0.05, 0.1, 0.25, 0.5, 0.75, 1]
-    delta = [d * obsl.n_obstacles for d in deltas] # scale
+    # deltas = [0.05, 0.1, 0.25, 0.5, 0.75, 1]
+    # deltas = [d * obsl.n_obstacles for d in deltas] # scale
+    deltas = [0.15, 0.3, 0.75, 1.5, 2.25, 3]
 
     for d in deltas:
         config.MPC.num_parallel_computations = 500 # set sample size
@@ -238,16 +243,16 @@ if __name__ == "__main__":
         duration_bnn, smoothness_bnn, obs_dist_bnn, num_collisions_bnn = get_simulation_results(bnn, "BNN", str(d))
 
         with (open(RESULTS_PATH + "total duration.csv", "a")) as f:
-            f.write(f"\n{d},{duration_gp},{duration_bnn}")
+            f.write(f"\n{d/3},{duration_gp},{duration_bnn}")
             f.close()
         with (open(RESULTS_PATH + "smoothness.csv", "a")) as f:
-            f.write(f"\n{d},{smoothness_gp},{smoothness_bnn}")
+            f.write(f"\n{d/3},{smoothness_gp},{smoothness_bnn}")
             f.close()
         with (open(RESULTS_PATH + "average obstacle dist.csv", "a")) as f:
-            f.write(f"\n{d},{obs_dist_gp},{obs_dist_bnn}")
+            f.write(f"\n{d/3},{obs_dist_gp},{obs_dist_bnn}")
             f.close()
         with (open(RESULTS_PATH + "num collisions.csv", "a")) as f:
-            f.write(f"\n{d},{num_collisions_gp},{num_collisions_bnn}")
+            f.write(f"\n{d/3},{num_collisions_gp},{num_collisions_bnn}")
             f.close()
 
     obsl.reset_xmls()

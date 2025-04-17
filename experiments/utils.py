@@ -6,27 +6,28 @@ moving_path  = "experiments/results/trajectory_planning_moving/line graphs/"
 stationary_path = "experiments/results/trajectory_planning_stationary/line graphs/"
 stylised_path = "experiments/results/stylised_trajectory_planning/line graphs/"
 
-output_path = stationary_path
+output_path = stylised_path
 
-def make_line_graph(path):
-    data = np.array(pd.read_csv(path,engine='python'))
-    x = data[:,0]
-    y1 = data[:,1]
-    y2 = data[:,2]
-    y3 = data[:,3]
+# def make_line_graph(path):
+#     data = np.array(pd.read_csv(path,engine='python'))
+#     x = data[:,0]
+#     y1 = data[:,1]
+#     y2 = data[:,2]
+#     y3 = data[:,3]
     
-    plt.plot(x,y1, label='MPPI Sampler')
-    plt.plot(x,y2, label='GP Sampler')
-    plt.plot(x,y3, label='BNN Sampler')
+#     plt.plot(x,y1, label='MPPI Sampler')
+#     plt.plot(x,y2, label='GP Sampler')
+#     plt.plot(x,y3, label='BNN Sampler')
 
-    plt.xlabel("")
-    plt.ylabel("")
-    plt.title("")
+#     plt.xlabel("Number of samples")
 
-    plt.legend()
-    # plt.show()
-    plt.savefig(output_path + "num_collisions.png")
-    plt.close()
+#     plt.ylabel("Duration (s)")
+#     plt.title("Duration")
+
+#     plt.legend()
+#     # plt.show()
+#     plt.savefig(output_path + "total_duration.png")
+#     plt.close()
 
 
 def make_line_graph_2(path):
@@ -35,12 +36,13 @@ def make_line_graph_2(path):
     y1 = data[:,1]
     y2 = data[:,2]
     
-    plt.plot(x,y1, label='MPPI Sampler')
-    plt.plot(x,y2, label='GP Sampler')
+    plt.plot(x,y1, label='GP Sampler')
+    plt.plot(x,y2, label='BNN Sampler')
 
-    plt.xlabel("")
-    plt.ylabel("")
-    plt.title("")
+    plt.xlabel("Delta (constraint violation threshold)")
+
+    plt.ylabel("Total duration (s)")
+    plt.title("Total Duration")
 
     plt.legend()
     # plt.show()
@@ -57,8 +59,8 @@ def get_smoothness(traj):
     y_acc = np.diff(y_vel, axis=0)
     z_acc = np.diff(z_vel, axis=0)
 
-    return np.sum((x_acc**2 + y_acc**2 + z_acc**2)/3)
+    return np.sum((x_acc**2 + y_acc**2 + z_acc**2)/3) # get average acceleration
 
 
-# make_line_graph("experiments/results/trajectory_planning_stationary/num collisions.csv")
-# make_line_graph_2("experiments/results/stylised_trajectory_planning/total duration.csv")
+# make_line_graph("experiments/results/trajectory_planning_stationary/total duration.csv")
+make_line_graph_2("experiments/results/stylised_trajectory_planning/total duration.csv")
