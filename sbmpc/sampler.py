@@ -6,15 +6,26 @@ from sbmpc.settings import Config
 
 from functools import partial
 
+ZERO_RANDOM_DEVIATIONS = None
+NUM_PARALLEL_COMPUTATIONS = None
+NUM_CONTROL_POINTS = None
+MODEL_NU = None
+STD_DEV = None
+OPTIMAL_SAMPLES = None
+
 class Sampler(ABC):
 
     def __init__(self, config: Config) -> None:
         # Initialize the vector storing the current optimal input sequence
+        global ZERO_RANDOM_DEVIATIONS, NUM_PARALLEL_COMPUTATIONS, NUM_CONTROL_POINTS, MODEL_NU, STD_DEV, OPTIMAL_SAMPLES
         self.horizon = config.MPC.horizon
         self.num_control_points = config.MPC.num_control_points
+        NUM_CONTROL_POINTS = self.num_control_points
         self.model_nu = config.robot.nu
+        MODEL_NU = self.model_nu
         self.lam = config.MPC.lambda_mpc
         self.std_dev = config.MPC.std_dev_mppi
+        STD_DEV = self.std_dev
         self.std_dev_horizon = jnp.tile(self.std_dev, self.num_control_points)
         self.dtype_general = config.general.dtype
         # Monte-carlo samples, that is the number of trajectories that are evaluated in parallel
@@ -23,9 +34,10 @@ class Sampler(ABC):
             self.optimal_samples = jnp.zeros((self.horizon, self.model_nu), dtype=self.dtype_general)
         else:
             self.optimal_samples = jnp.tile(config.MPC.initial_guess, (self.horizon, 1))
+        OPTIMAL_SAMPLES = self.optimal_samples
         # scaffolding for storing all the control actions on the prediction horizon for each rollout
-        self.zero_random_deviations = jnp.zeros((self.num_parallel_computations, self.num_control_points, self.model_nu), dtype=self.dtype_general)
-
+        ZERO_RANDOM_DEVIATIONS = jnp.zeros((self.num_parallel_computations, self.num_control_points, self.model_nu), dtype=self.dtype_general)
+        NUM_PARALLEL_COMPUTATIONS = self.num_parallel_computations
         # this is initialized at the first interation
         self.additional_random_samples_clipped = None
 
@@ -33,8 +45,8 @@ class Sampler(ABC):
 
         
 
-    @abstractmethod
-    def sample_input_sequence(self,key) -> jnp.ndarray:
+    @staticmethod
+    def sample_input_sequence(key) -> jnp.ndarray:
         pass
 
     #def compute_next_best(self,samples, costs) -> jnp.ndarray:
@@ -67,12 +79,13 @@ class MPPISampler(Sampler):
     def __init__(self, config: Config) -> None:
         super().__init__(config)
         
-    @partial(jax.jit, static_argnums=(0,))
-    def sample_input_sequence(self, key) -> jnp.ndarray:
+    @staticmethod
+    @partial(jax.jit)
+    def sample_input_sequence( key) -> jnp.ndarray:
         # Generate random samples
-        samples_delta = self.zero_random_deviations
+        samples_delta = jnp.copy(ZERO_RANDOM_DEVIATIONS)
         # One sample is kept equal to the guess
-        sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model_nu)) * self.std_dev
+        sampled_variation_all = jax.random.normal(key=key, shape=(NUM_PARALLEL_COMPUTATIONS-1, NUM_CONTROL_POINTS, MODEL_NU)) * STD_DEV
         samples_delta = samples_delta.at[1:, :, :].set(sampled_variation_all)
         return sampled_variation_all
 
