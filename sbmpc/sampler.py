@@ -63,6 +63,8 @@ class CEMSampler(Sampler):
     def update(self, initial_guess, samples, costs)-> jnp.ndarray:
         return initial_guess
 
+
+
 class MPPISampler(Sampler):
     def __init__(self, config: Config) -> None:
         super().__init__(config)

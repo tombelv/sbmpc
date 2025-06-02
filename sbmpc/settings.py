@@ -21,14 +21,13 @@ class RobotConfig:
     def __init__(self):
         self._robot_scene_path = ""
         self._mjx_kinematic = False
-        self._nq = None
-        self._nv = None
+        self._nq = 0
+        self._nv = 0
         self._nu = None
-        self._nx = None
+        self._nx = 0
 
         self._input_min = None
         self._input_max = None
-        # self.__init_input_limits_from_nu()
         self._q_init = None
 
     def __init_input_limits_from_nu(self):
@@ -90,6 +89,31 @@ class RobotConfig:
     @property
     def nx(self):
         return self._nx
+    
+    @property
+    def input_min(self):
+        return self._input_min
+    
+    @input_min.setter
+    def input_min(self, value: Array):
+        if not isinstance(value, Array):
+            raise ValueError("jax Array type is expected")
+        if len(value) != self._nu:
+            raise ValueError("length must match nu")
+        self._input_min = value
+    
+    @property
+    def input_max(self):
+        return self._input_max
+    
+    @input_max.setter
+    def input_max(self, value: Array):
+        if not isinstance(value, Array):
+            raise ValueError("jax Array type is expected")
+        if len(value) != self._nu:
+            raise ValueError("length must match nu")
+        self._input_max = value
+    
 
 
     @property
@@ -313,11 +337,22 @@ class Config:
 
         self.robot = robot_config
 
-        self.solver_dynamics = DynamicsModel.CUSTOM
+        self._solver_dynamics = DynamicsModel.CUSTOM
         self.solver_type = Solver.MPPI
 
         self.sim_dynamics = DynamicsModel.CUSTOM
         self.sim_iterations = 500
 
         self.MPC = MPCConfig(robot_config)
+
+    @property
+    def solver_dynamics(self):
+        return self._solver_dynamics
+    
+    @solver_dynamics.setter
+    def solver_dynamics(self, value: DynamicsModel):
+        if not isinstance(value, DynamicsModel):
+            raise ValueError("DynamicsModel type is expected")
+        self._solver_dynamics = value
+
 

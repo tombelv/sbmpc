@@ -24,12 +24,15 @@ class BaseModel(ABC):
             self.input_max = input_bounds[1]
 
         self.nominal_parameters = jnp.array([])
-    
+
     def get_nq(self):
         return self.nq
 
     def integrate(self, state, inputs, dt):
         pass
+
+    def integrate_sim(self, state, inputs, dt):
+        return self.integrate(state, inputs, dt)
 
     def integrate_rollout(self, state, inputs, dt):
         pass
@@ -140,6 +143,7 @@ class Model(ModelParametric):
 class ModelMjx(BaseModel):
     def __init__(self, model_path, kinematic=False, input_bounds=(-jnp.inf, jnp.inf)):
         self.model_path = model_path
+        self.kinematic = kinematic
         # Load the MuJoCo model
         self.mj_model = mujoco.MjModel.from_xml_path(filename=self.model_path)
 
@@ -162,11 +166,13 @@ class ModelMjx(BaseModel):
             integrate_vect = jax.vmap(self._integrate_kinematic, in_axes=(0, 0, None))
             self.integrate_rollout = jax.jit(integrate_vect)
             self.integrate = jax.jit(self._integrate_kinematic)
+            self.integrate_sim = jax.jit(self._integrate_mjx)
             self.integrate_rollout_single = self.integrate
         else:
             integrate_vect = jax.vmap(self._integrate, in_axes=(0, 0, None))
             self.integrate_rollout = jax.jit(integrate_vect)
             self.integrate = jax.jit(self._integrate_mjx)
+            self.integrate_sim = jax.jit(self._integrate_mjx)
             self.integrate_rollout_single = self._integrate
 
 
@@ -188,7 +194,3 @@ class ModelMjx(BaseModel):
     def set_qpos(self, qpos):
         self.data = self.data.replace(qpos=qpos)
         self.mj_data.qpos = qpos
-
-
-
-        

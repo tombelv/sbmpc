@@ -73,7 +73,7 @@ def quadrotor_dynamics(state: jnp.array, inputs: jnp.array, params: jnp.array) -
 class Objective(BaseObjective):
     """ Cost function for the Quadrotor regulation task"""
 
-    def compute_state_error(self, state: jnp.array, state_ref : jnp.array) -> jnp.array:
+    def compute_state_error(self, state: jnp.ndarray, state_ref : jnp.ndarray):
         pos_err = state[0:3] - state_ref[0:3]
         att_err = quat_product(quat_inverse(state[3:7]), state_ref[3:7])[1:4]
         vel_err = state[7:10] - state_ref[7:10]
@@ -81,7 +81,7 @@ class Objective(BaseObjective):
 
         return pos_err, att_err, vel_err, ang_vel_err
 
-    def running_cost(self, state: jnp.array, inputs: jnp.array, reference):
+    def running_cost(self, state: jnp.ndarray, inputs: jnp.ndarray, reference):
         state_ref = reference[:13]
         state_ref = state_ref.at[7:10].set(-1*(state[0:3] - state_ref[0:3]))
         input_ref = reference[13:13+4]
@@ -112,7 +112,7 @@ if __name__ == "__main__":
     robot_config.input_min = INPUT_MIN
     robot_config.input_max = INPUT_MAX
     robot_config.q_init = jnp.array([0., 0., 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
-    
+
     config = settings.Config(robot_config)
 
     config.general.visualize = False

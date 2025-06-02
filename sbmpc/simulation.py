@@ -143,8 +143,11 @@ class Simulator(ABC):
         if isinstance(initial_state, (np.ndarray, jnp.ndarray)):
             self.current_state_vec = lambda: self.current_state
         elif isinstance(initial_state, mjx.Data):
-            self.current_state_vec = lambda: np.concatenate(
-                [self.current_state.qpos, self.current_state.qvel])
+            if model.kinematic:
+                self.current_state_vec = lambda: jnp.array(self.current_state.qpos)
+            else:
+                self.current_state_vec = lambda: jnp.concatenate(
+                    [self.current_state.qpos, self.current_state.qvel])
         else:
             raise ValueError("""
                         Invalid initial state.
@@ -217,6 +220,8 @@ class Simulation(Simulator):
     def update(self):
         # Compute the optimal input sequence
         time_start = time.time_ns()
+        print("iteration: ", self.iter)
+        print("current state: ", self.current_state_vec())
         input_sequence = self.controller.command(self.current_state_vec(), self.const_reference, num_steps=1).block_until_ready()
         ctrl = input_sequence[0, :].block_until_ready()
         print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
@@ -224,7 +229,7 @@ class Simulation(Simulator):
         self.input_traj[self.iter, :] = ctrl
 
         # Simulate the dynamics
-        self.current_state = self.model.integrate(self.current_state, ctrl, self.rollout_gen.dt)
+        self.current_state = self.model.integrate_sim(self.current_state, ctrl, self.rollout_gen.dt)
         self.state_traj[self.iter + 1,  :] = self.current_state_vec() #[:self.model.nx] # set only qpos and qvel
 
 
@@ -239,7 +244,10 @@ def build_custom_model(custom_dynamics_fn: Callable, nq: int, nv: int, nu: int, 
 def build_mjx_model(scene_path: str, kinematic: bool = False) -> Tuple[BaseModel, jnp.array, jnp.array]:
     system = ModelMjx(scene_path, kinematic=kinematic)
     q_init = system.data.qpos
-    x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
+    if not kinematic:
+        x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
+    else:
+        x_init = q_init
     state_init = system.data
     return system, x_init, state_init
 
@@ -264,9 +272,11 @@ def build_model_and_solver(config: settings.Config, objective: BaseObjective, cu
     if config.solver_type != settings.Solver.MPPI:
         raise NotImplementedError
     solver_dynamics_model_setting = config.solver_dynamics
-    system, solver_x_init, sim_state_init = build_model_from_config(solver_dynamics_model_setting, config, custom_dynamics_fn)
-    rollout_gen = RolloutGenerator(system, objective, config)
-    return system, rollout_gen
+    solver_dynamics_model, solver_x_init, sim_state_init = build_model_from_config(solver_dynamics_model_setting, config, custom_dynamics_fn)
+    rollout_generator = RolloutGenerator(solver_dynamics_model, objective, config)
+    sampler = MPPISampler(config)
+    gains = MPPIGain(config)
+    return solver_dynamics_model, Controller(rollout_generator, sampler, gains)
 
 def build_all(config: settings.Config, objective: BaseObjective,
               reference: jnp.array,

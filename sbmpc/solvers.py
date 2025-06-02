@@ -74,7 +74,6 @@ class RolloutGenerator():
         # check if we need to move it
         self.num_parallel_computations = config.MPC.num_parallel_computations
 
-
         self.compute_gains = config.MPC.gains
         
         # Covariance of the input action
@@ -232,6 +231,7 @@ class Controller:
     def __init__(self, rollout_gen : RolloutGenerator, sampler : Sampler, gains_obj: Gains):
 
         self.rollout_gen = rollout_gen
+        self.objective = rollout_gen.objective
         self.sampler = sampler
         self.gains_obj = gains_obj
            
@@ -262,3 +262,7 @@ class Controller:
         optimal_samples_shifted = optimal_samples_shifted.at[-1, :].set(
             optimal_samples_shifted[-2:-1, :].reshape(-1))
         return optimal_samples_shifted
+    
+    @property
+    def gains(self):
+        return self.gains_obj.cur_gains
