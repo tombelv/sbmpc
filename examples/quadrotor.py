@@ -115,7 +115,7 @@ if __name__ == "__main__":
 
     config = settings.Config(robot_config)
 
-    config.general.visualize = False
+    config.general.visualize = True
     config.MPC.dt = 0.02
     config.MPC.horizon = 25
     config.MPC.std_dev_mppi = 0.2*jnp.array([0.1, 0.1, 0.1, 0.05])

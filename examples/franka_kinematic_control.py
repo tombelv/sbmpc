@@ -59,7 +59,7 @@ if __name__ == "__main__":
     config.MPC.dt = 0.02
     config.MPC.horizon = 50
     config.MPC.std_dev_mppi = 0.2*jnp.ones(robot_config.nu)
-    config.MPC.num_parallel_computations = 10000
+    config.MPC.num_parallel_computations = 100
     config.MPC.lambda_mpc = 10.0
     config.MPC.smoothing = "Spline"
     config.MPC.num_control_points = 5

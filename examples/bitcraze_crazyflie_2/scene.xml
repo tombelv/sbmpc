@@ -1,5 +1,5 @@
 <mujoco model="CF2 scene">
-  <include file="obstacles.xml" /><include file="obstacles.xml" /><include file="cf2.xml" />
+  <include file="cf2.xml" />
 
   <statistic center="0 0 0.1" extent="0.2" meansize=".05" />
 
