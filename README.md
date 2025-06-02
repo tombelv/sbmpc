@@ -34,10 +34,3 @@ pip install -e ".[cuda12_local]"
 Refer to the Jax documentation for details.
 
 
-# TODO
-- [x] Control parametrization (splines etc)
-- [x] Multivariate gaussian sampling 
-- [x] Generic constraints
-- [ ] adding Adam for interfacing the library with any urdf 
-
-
