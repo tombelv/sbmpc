@@ -5,14 +5,12 @@ We use the same Linear dynamics and cost of the LQR.
 """
 
 import control
-import time, os
 
-import jax
 import jax.numpy as jnp
 
 import matplotlib.pyplot as plt
 
-from sbmpc import Model, BaseObjective
+from sbmpc import BaseObjective
 import sbmpc.settings as settings
 from sbmpc.simulation import build_model_and_solver
 
@@ -88,9 +86,6 @@ if __name__ == "__main__":
     solver.sampler.optimal_samples = optimal_inputs
 
     input = solver.command(jnp.array([0.0, 0.0]), jnp.array([0.5, 0.0]), False, num_steps=1).block_until_ready()
-
-    print(input[0])
-    print("optimal inputs: ", optimal_inputs[0])
 
     mppi_gains = solver.gains[0]
 
