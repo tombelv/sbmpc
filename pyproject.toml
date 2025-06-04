@@ -1,11 +1,7 @@
 [project]
 name = "sbmpc"
 authors = [
-  { name="Tommaso Belvedere", email="tommaso.belvedere@irisa.fr" },
-  { name="Giulio Turrisi", email="giulio.turrisi@iit.it" },
-  { name="Valerio Modugno", email="v.modugno@ucl.ac.uk" },
-  { name="Chidinma Ezeji", email="" },
-  { name="Michael Ziegltrum", email="mzandtheraspberrypi@gmail.com" },
+  { name="Anon", email="" },
 ]
 dynamic = ["version", "dependencies"]
 description = "A package to do sampling based trajectory control for robotic applications."
