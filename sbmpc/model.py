@@ -166,7 +166,7 @@ class ModelMjx(BaseModel):
             integrate_vect = jax.vmap(self._integrate_kinematic, in_axes=(0, 0, None))
             self.integrate_rollout = jax.jit(integrate_vect)
             self.integrate = jax.jit(self._integrate_kinematic)
-            self.integrate_sim = jax.jit(self._integrate_mjx)
+            self.integrate_sim = jax.jit(self._integrate_kinematic_mjx)
             self.integrate_rollout_single = self.integrate
         else:
             integrate_vect = jax.vmap(self._integrate, in_axes=(0, 0, None))
@@ -190,6 +190,13 @@ class ModelMjx(BaseModel):
 
     def _integrate_kinematic(self, state: jnp.ndarray, inputs: jnp.array, dt: float):
         return state + dt * inputs
+    
+    def _integrate_kinematic_mjx(self, state: jnp.ndarray, inputs: jnp.array, dt: float):
+        qpos = state.qpos
+        qpos_next = qpos + dt * inputs
+        state_next = self.data
+        state_next = state_next.replace(qpos=qpos_next)
+        return state_next 
 
     def set_qpos(self, qpos):
         self.data = self.data.replace(qpos=qpos)

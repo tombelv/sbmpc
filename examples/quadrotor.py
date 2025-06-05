@@ -1,4 +1,5 @@
 import os
+from time import sleep
 
 import jax
 import jax.numpy as jnp
@@ -97,8 +98,11 @@ class Objective(BaseObjective):
                 5 * vel_err.transpose() @ vel_err +
                 1 * ang_vel_err.transpose() @ ang_vel_err)
 
-    def constraints(self, state, inputs, reference):
-        return jnp.array([state[0] - 0.3, state[1] - 0.4])
+    # def constraints(self, state, inputs, reference):
+    #     return jnp.array([state[0] - 0.3, state[1] - 0.4])
+
+
+
 
 
 if __name__ == "__main__":
@@ -111,7 +115,7 @@ if __name__ == "__main__":
     robot_config.nu = 4
     robot_config.input_min = INPUT_MIN
     robot_config.input_max = INPUT_MAX
-    robot_config.q_init = jnp.array([0., 0., 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
+    robot_config.q_init = jnp.array([0., 0., 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
 
     config = settings.Config(robot_config)
 
@@ -129,6 +133,8 @@ if __name__ == "__main__":
     config.solver_dynamics = settings.DynamicsModel.CUSTOM
     config.sim_dynamics = settings.DynamicsModel.CUSTOM
 
+    config.sim_iterations = 200  # number of simulation iterations
+
     q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
     x_des = jnp.concatenate([q_des, jnp.zeros(robot_config.nv, dtype=jnp.float32)], axis=0)
 
@@ -136,7 +142,8 @@ if __name__ == "__main__":
 
     objective = Objective()
 
-    sim = build_all(config, objective,
+    sim = build_all(config, 
+                    objective,
                     reference,
                     custom_dynamics_fn=quadrotor_dynamics,
                     obstacles=False)

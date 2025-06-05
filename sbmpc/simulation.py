@@ -61,7 +61,7 @@ class Visualizer(ABC):
 
 
 class MujocoVisualizer(Visualizer):
-    def __init__(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData, step_mujoco: bool = True, show_left_ui: bool = False, show_right_ui: bool = False, num_iters: int = 100):
+    def __init__(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData, step_mujoco: bool = True, show_left_ui: bool = True, show_right_ui: bool = False, num_iters: int = 100):
         self.mj_data = mj_data
         self.mj_model = mj_model
         self.step_mujoco = step_mujoco
@@ -114,7 +114,7 @@ class MujocoVisualizer(Visualizer):
         for i in range(1,n+1): 
             self.mj_model.body_pos[i] = obs_pos[i-1]
 
-def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str, num_iters: int):
+def construct_mj_visualizer_from_model(model: BaseModel, config: settings.Config):
     mj_model, mj_data = (None, None)
 
     step_mujoco = True
@@ -122,22 +122,22 @@ def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str, num_it
         mj_model = model.mj_model
         mj_data = model.mj_data
     else:
-        new_system = ModelMjx(scene_path)
+        new_system = ModelMjx(config.robot.robot_scene_path)
         mj_model = new_system.mj_model
         mj_data = new_system.mj_data
 
-    visualizer = MujocoVisualizer(mj_model, mj_data, step_mujoco=step_mujoco, num_iters=num_iters) 
+    visualizer = MujocoVisualizer(mj_model, mj_data, step_mujoco=step_mujoco, num_iters=config.sim_iterations) 
     return visualizer
 
 
 class Simulator(ABC):
-    def __init__(self, initial_state, model: BaseModel, rollout_gen: RolloutGenerator, sampler: Sampler, gains : Gains, num_iter=100, visualizer: Optional[Visualizer] = None, obstacles:bool = True):
+    def __init__(self, initial_state, model: BaseModel, rollout_gen: RolloutGenerator, sampler: Sampler, gains : Gains, config, visualizer: Optional[Visualizer] = None, obstacles:bool = True):
         self.iter = 0
         self.current_state = initial_state
         self.model = model
         self.controller = Controller(rollout_gen, sampler, gains)
         self.rollout_gen = rollout_gen
-        self.num_iter = num_iter
+        self.num_iter = config.sim_iterations
         self.obstacles = obstacles
 
         if isinstance(initial_state, (np.ndarray, jnp.ndarray)):
@@ -163,8 +163,14 @@ class Simulator(ABC):
         self.paused = False
         self.obstacles = obstacles
 
-    @abstractmethod
     def update(self):
+        pass
+
+    def post_update(self, data=None):
+        """
+        This method can be overridden to perform any post-update actions.
+        It is called after the update method in each simulation step.
+        """
         pass
 
     def simulate(self):
@@ -188,34 +194,35 @@ class Simulator(ABC):
                             (time.time() - step_start)
                         if time_until_next_step > 0:
                             time.sleep(time_until_next_step)
+                self.visualizer.close()
             except Exception as err:
                 tb_str = traceback.format_exc()
                 logging.error("caught exception below, closing visualizer")
                 logging.error(tb_str)
                 self.visualizer.close()
                 raise
-            self.visualizer.close()
         else:
             while self.iter < self.num_iter:
                 self.step()
 
     def step(self):
         self.update()
+        self.post_update(self)
         self.iter += 1
 
 ROBOT_SCENE_PATH_KEY = "robot_scene_path"
 
 class Simulation(Simulator):
-    def __init__(self, initial_state, model, controller, sampler, gains, const_reference: jnp.array, num_iterations: int, visualize: bool = True, visualize_params: Optional[Dict] = None, obstacles:bool = True):
+    def __init__(self, initial_state, model, controller, sampler, gains, const_reference: jnp.array, config: settings.Config, visualize_params: Optional[Dict] = None, obstacles:bool = True):
         self.const_reference = const_reference
         visualizer = None
-        if visualize:
+        if config.general.visualize:
             scene_path = visualize_params.get(ROBOT_SCENE_PATH_KEY, None)
             if visualize_params is None or scene_path is None:
                 raise ValueError("if visualizing need to input scene path for mjx")
-            visualizer = construct_mj_visualizer_from_model(model, scene_path=scene_path, num_iters=num_iterations)
+            visualizer = construct_mj_visualizer_from_model(model, config)
 
-        super().__init__(initial_state, model, controller,sampler,gains, num_iterations, visualizer, obstacles)
+        super().__init__(initial_state, model, controller,sampler,gains, config, visualizer, obstacles)
 
     def update(self):
         # Compute the optimal input sequence
@@ -241,10 +248,11 @@ def build_custom_model(custom_dynamics_fn: Callable, nq: int, nv: int, nu: int, 
     return system, x_init, state_init
 
 
-def build_mjx_model(scene_path: str, kinematic: bool = False) -> Tuple[BaseModel, jnp.array, jnp.array]:
-    system = ModelMjx(scene_path, kinematic=kinematic)
+def build_mjx_model(config) -> Tuple[BaseModel, jnp.array, jnp.array]:
+    system = ModelMjx(config.robot.robot_scene_path, kinematic=config.robot.mjx_kinematic)
+    system.set_qpos(config.robot.q_init)
     q_init = system.data.qpos
-    if not kinematic:
+    if not config.robot.mjx_kinematic:
         x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
     else:
         x_init = q_init
@@ -264,7 +272,7 @@ def build_model_from_config(model_type: settings.DynamicsModel, config: settings
         integrator_type = config.general.integrator_type
         return build_custom_model(custom_dynamics_fn, nq, nv, nu, input_min, input_max, q_init, integrator_type, obstacle_loader)
     elif model_type == settings.DynamicsModel.MJX:
-        return build_mjx_model(config.robot.robot_scene_path, config.robot.mjx_kinematic)
+        return build_mjx_model(config)
     else:
         raise NotImplementedError
 
@@ -309,7 +317,7 @@ def build_all(config: settings.Config, objective: BaseObjective,
 
     # Setup and run the simulation
     num_iterations = config.sim_iterations
-    sim = Simulation(sim_state_init, sim_dynamics_model, rollout_generator, sampler, gains, reference, num_iterations, visualize, visualizer_params, obstacles)
+    sim = Simulation(sim_state_init, sim_dynamics_model, rollout_generator, sampler, gains, reference, config, visualizer_params, obstacles)
     
     # dummy for jitting
     input_sequence = sim.controller.command(solver_x_init, reference, False).block_until_ready()

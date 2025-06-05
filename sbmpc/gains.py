@@ -19,9 +19,6 @@ class Gains(ABC):
         pass
 
 
-
-
-
 class MPPIGain(Gains):
     def __init__(self, config: Config) -> None:
         super().__init__(config)

@@ -43,41 +43,42 @@ class Objective(BaseObjective):
         return 100*((ee_pos - reference[:3]) ** 2).sum()
 
 
+def post_update(sim):
+    current_ee_pos = sim.controller.objective.compute_ee_pos(sim.current_state_vec())
+    print(f"Current EE position: {current_ee_pos}")
 
 
 if __name__ == "__main__":
+
+
+    system = ModelMjx(SCENE_PATH, kinematic=True)
+    q0 = system.mj_model.key_qpos[mujoco.mj_name2id(system.mj_model, mujoco.mjtObj.mjOBJ_KEY.value, "home")]
 
     robot_config = RobotConfig()
 
     robot_config.robot_scene_path = SCENE_PATH
     robot_config.mjx_kinematic = True
-    robot_config.nu = 7
-    robot_config.nq = 7
+    robot_config.nu = system.mj_model.nu
+    robot_config.nq = system.mj_model.nq
+    robot_config.q_init = jnp.array(q0)
 
     config = Config(robot_config)
-    config.general.visualize = False
+    config.general.visualize = True
     config.MPC.dt = 0.02
     config.MPC.horizon = 50
     config.MPC.std_dev_mppi = 0.2*jnp.ones(robot_config.nu)
-    config.MPC.num_parallel_computations = 100
-    config.MPC.lambda_mpc = 10.0
+    config.MPC.num_parallel_computations = 500
+    config.MPC.lambda_mpc = 100.0
     config.MPC.smoothing = "Spline"
     config.MPC.num_control_points = 5
-
 
     config.solver_dynamics = DynamicsModel.MJX
     config.sim_dynamics = DynamicsModel.MJX
 
-    system = ModelMjx(SCENE_PATH, kinematic=True)
-    system.set_qpos(system.mj_model.key_qpos[mujoco.mj_name2id(system.mj_model, mujoco.mjtObj.mjOBJ_KEY.value, "home")])
-    robot_config.q_init = jnp.array(system.data.qpos)
-    print("Initial configuration = ", system.data.qpos)
+    config.sim_iterations = 1000
 
     # Reference for the end-effector position
-    ee_des = jnp.array([-0.5, 0.4, 0.3], dtype=jnp.float32)
-
-    # x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
-    # state_init = system.data
+    ee_des = jnp.array([-0.5, -0.5, 0.3], dtype=jnp.float32)
 
     objective = Objective(system)
     sim = build_all(
@@ -87,6 +88,8 @@ if __name__ == "__main__":
         custom_dynamics_fn=None,
         obstacles=False
     )
+
+    sim.post_update = post_update
 
     sim.simulate()
 
