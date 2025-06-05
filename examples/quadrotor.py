@@ -150,18 +150,18 @@ if __name__ == "__main__":
 
     sim.simulate()
 
-    time_vect = config.MPC.dt*jnp.arange(sim.state_traj.shape[0])
-    ax = plt.figure().add_subplot(projection='3d')
-    # Plot x-y-z position of the robot
-    ax.plot(sim.state_traj[:, 0], sim.state_traj[:, 1], sim.state_traj[:, 2])
-    plt.show()
-    plt.plot(time_vect, sim.state_traj[:, 0:3])
-    plt.legend(["x", "y", "z"])
-    plt.grid()
-    plt.show()
-    # Plot the input trajectory
-    plt.plot(time_vect[:-1], sim.input_traj)
-    plt.legend(["F", "t_x", "t_y", "t_z"])
-    plt.grid()
+    # time_vect = config.MPC.dt*jnp.arange(sim.state_traj.shape[0])
+    # ax = plt.figure().add_subplot(projection='3d')
+    # # Plot x-y-z position of the robot
+    # ax.plot(sim.state_traj[:, 0], sim.state_traj[:, 1], sim.state_traj[:, 2])
+    # plt.show()
+    # plt.plot(time_vect, sim.state_traj[:, 0:3])
+    # plt.legend(["x", "y", "z"])
+    # plt.grid()
+    # plt.show()
+    # # Plot the input trajectory
+    # plt.plot(time_vect[:-1], sim.input_traj)
+    # plt.legend(["F", "t_x", "t_y", "t_z"])
+    # plt.grid()
 
-    plt.show()
+    # plt.show()

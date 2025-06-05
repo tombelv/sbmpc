@@ -70,6 +70,8 @@ class MujocoVisualizer(Visualizer):
                                                    show_left_ui=show_left_ui,
                                                    show_right_ui=show_right_ui,
                                                    key_callback=self.key_callback)
+        # viewer.set_cam_distance(1.5)
+        self.set_cam_lookat((0, -0.25, 0.25))
         self.obsl = ObstacleLoader()
         self.obstacle_ref = self.obsl.get_obstacle_trajectory(num_iters, function="circle")
 
@@ -176,8 +178,6 @@ class Simulator(ABC):
     def simulate(self):
         if self.visualizer is not None:
             try:
-                # viewer.set_cam_distance(1.5)
-                self.visualizer.set_cam_lookat((0, 0, 0.6))
                 while self.visualizer.is_running() and self.iter < self.num_iter:
                     if not self.paused:
                         step_start = time.time()
