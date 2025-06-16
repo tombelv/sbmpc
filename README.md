@@ -34,3 +34,12 @@ pip install -e ".[cuda12_local]"
 Refer to the Jax documentation for details.
 
 
+## Contributors
+
+- Tommaso Belvedere, CNRS (core developer, project lead)
+- Michael Ziegltrum, UCL (feature developer)
+- Chidinma Ezeji, UCL (feature developer)
+- Giulio Turrisi, IIT (project lead)
+- Valerio Modugno, UCL (core developer, project lead)
+
+
