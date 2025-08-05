@@ -5,6 +5,7 @@ from sbmpc.gains import Gains
 
 import jax.numpy as jnp
 import jax
+import numpy as np
 
 from functools import partial
 from abc import ABC, abstractmethod
@@ -23,13 +24,13 @@ class BaseObjective(ABC):
         return 0.0
 
     def cost_and_constraints(self, state, inputs, reference):
-        return self.running_cost(state, inputs, reference) + jnp.sum(self.make_barrier(self.constraints(state, inputs, reference)))
+        return self.running_cost(state, inputs, reference) + jnp.sum(self.make_barrier(self.constraints(state, inputs, reference)[0]))
 
     def final_cost_and_constraints(self, state, reference):
         return self.final_cost(state, reference) + jnp.sum(self.make_barrier(self.terminal_constraints(state, reference)))
 
     def make_barrier(self, constraint_array):
-        constraint_array = jnp.where(constraint_array > 0, 1e3, 0.0)
+        constraint_array = jnp.where(constraint_array < 0, 1e3, 0.0)
         return constraint_array
 
     def constraints(self, state, inputs, reference):
@@ -38,6 +39,13 @@ class BaseObjective(ABC):
     def terminal_constraints(self, state, reference):
         return 0.0
 
+    def write(self,num_rej):
+        self.num_sample_rejections.append(num_rej)
+        f = open("/home/ubuntu/sbmpc/experiments/sample_rejections.txt", "w")
+        f.write(str(np.array(self.num_sample_rejections)))
+        f.close()
+        return num_rej
+    
 
 
 class RolloutGenerator():
@@ -104,7 +112,7 @@ class RolloutGenerator():
         return jnp.clip(control_variables, self.input_min_full_horizon, self.input_max_full_horizon)
     
 
-    @partial(jax.vmap, in_axes=(None, None, None, 0), out_axes=(0, 0))
+    @partial(jax.vmap, in_axes=(None, None, None, 0), out_axes=(0, 0, 0))
     def rollout_all(self, initial_state, reference, control_variables):
         if self.config.MPC.sensitivity:
             return self.rollout_single_with_sensitivity(initial_state, reference, control_variables)
@@ -124,21 +132,24 @@ class RolloutGenerator():
     def rollout_single(self, initial_state, reference, control_variables):
         cost = 0.0
         curr_state = initial_state
+        rejections_total = 0
 
         control_variables = self.interpolate_control(control_variables)
         
         def cost_and_state_rollout(idx, cost_and_state):
-            cost, curr_state = cost_and_state
+            cost, curr_state, _ = cost_and_state
             cost += self.dt*self.cost_and_constraints(curr_state, control_variables[idx, :], reference[idx, :])
             next_state = self.model.integrate_rollout_single(curr_state, control_variables[idx, :], self.dt)
+            rejections = jnp.sum(jnp.where((self.objective.constraints(curr_state, control_variables[idx, :], reference[idx, :])[1]) < 0, 1, 0))  
             
-            return cost, next_state
+            return cost, next_state, rejections
 
-        cost, final_state = jax.lax.fori_loop(0, self.horizon, cost_and_state_rollout, (cost, curr_state))
+        cost, final_state, rejections = jax.lax.fori_loop(0, self.horizon, cost_and_state_rollout, (cost, curr_state, rejections_total))
+        rejections_total += rejections
 
         cost += self.dt*self.final_cost_and_constraints(final_state, reference[self.horizon, :])
 
-        return cost, control_variables
+        return cost, control_variables, rejections_total
     
 
     def rollout_single_with_sensitivity(self, initial_state, reference, control_variables):
@@ -213,12 +224,11 @@ class RolloutGenerator():
         if self.compute_gains:
             (costs, control_vars_all), gradients = self.rollout_sens_to_state(state, reference, control_vars_all)
         else:
-            costs, control_vars_all = self.rollout_all(state, reference, control_vars_all)
+            costs, control_vars_all, rejections_all = self.rollout_all(state, reference, control_vars_all)
 
         samples_delta_clipped = self.compute_samples_delta(control_vars_all, optimal_samples)
-        
 
-        return samples_delta_clipped, costs, gradients
+        return samples_delta_clipped, costs, gradients, jnp.sum(rejections_all)
     
 
     def compute_samples_delta(self, control_action, optimal_samples):
@@ -239,8 +249,8 @@ class Controller:
 
         for i in range(num_steps):
             samples_delta = self.sampler.sample_input_sequence(self.sampler.master_key, state)
-            samples, costs, gradients = self.rollout_gen.do_rollout(state, reference, optimal_samples, samples_delta, gains)
-            optimal_samples = self.sampler.update(optimal_samples, samples, costs)
+            samples, costs, gradients, rejections = self.rollout_gen.do_rollout(state, reference, optimal_samples, samples_delta, gains)
+            optimal_samples = self.sampler.update(optimal_samples, samples, costs, rejections)
             # update gains
             self.gains_obj.cur_gains = self.gains_obj.gains_computation(costs, samples, gradients)
        

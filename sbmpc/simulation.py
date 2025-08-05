@@ -60,7 +60,7 @@ class Visualizer(ABC):
 
 
 class MujocoVisualizer(Visualizer):
-    def __init__(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData, step_mujoco: bool = True, show_left_ui: bool = False, show_right_ui: bool = False, num_iters: int = 100):
+    def __init__(self, mj_model: mujoco.MjModel, mj_data: mujoco.MjData, step_mujoco: bool = True, show_left_ui: bool = False, show_right_ui: bool = False, num_iters: int = 500):
         self.mj_data = mj_data
         self.mj_model = mj_model
         self.step_mujoco = step_mujoco
@@ -70,7 +70,7 @@ class MujocoVisualizer(Visualizer):
                                                    show_right_ui=show_right_ui,
                                                    key_callback=self.key_callback)
         self.obsl = ObstacleLoader()
-        # self.obsl.n_obstacles = 5
+        self.obsl.n_obstacles = 5
         self.obsl.n_obstacles = 3
         self.obstacle_ref = self.obsl.get_obstacle_trajectory(num_iters, function="circle")
 
@@ -132,7 +132,7 @@ def construct_mj_visualizer_from_model(model: BaseModel, scene_path: str, num_it
 
 
 class Simulator(ABC):
-    def __init__(self, initial_state, model: BaseModel, rollout_gen: RolloutGenerator, sampler: Sampler, gains : Gains, num_iter=100, visualizer: Optional[Visualizer] = None, obstacles:bool = True):
+    def __init__(self, initial_state, model: BaseModel, rollout_gen: RolloutGenerator, sampler: Sampler, gains : Gains, num_iter=500, visualizer: Optional[Visualizer] = None, obstacles:bool = True):
         self.iter = 0
         self.current_state = initial_state
         self.model = model

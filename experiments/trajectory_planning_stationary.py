@@ -18,7 +18,9 @@ os.environ['XLA_FLAGS'] = '--xla_gpu_triton_gemm_any=True'
 jax.config.update("jax_default_matmul_precision", "high")
 
 SCENE_PATH = "examples/bitcraze_crazyflie_2/scene.xml"
-RESULTS_PATH = "experiments/results/trajectory_planning_stationary/"
+# RESULTS_PATH = "experiments/results/trajectory_planning_stationary/"
+RESULTS_PATH = "experiments/more results/stationary/"
+
 
 INPUT_MAX = jnp.array([1, 2.5, 2.5, 2])
 INPUT_MIN = jnp.array([0, -2.5, -2.5, -2])
@@ -92,7 +94,7 @@ class Objective(BaseObjective):
         obs_pos = jnp.reshape(reference[17:],(n_obs,3))
         dist_from_obs = jnp.array([jnp.sum(abs(pos - obs) - r) for obs in obs_pos])  # l1 dist 
         # dist_from_obs = jnp.array([(abs(pos - obs) - r) for obs in obs_pos]) 
-        return dist_from_obs 
+        return dist_from_obs, dist_from_obs
     
     def constraints_not_jit(self, state, inputs, reference):
         r = obsl.radius + 0.1                                           
@@ -112,6 +114,41 @@ class Objective(BaseObjective):
 
         return dist_from_obs 
 
+class ConstraintFreeObjective(BaseObjective):
+    def compute_state_error(self, state: jnp.array, state_ref : jnp.array) -> jnp.array:
+        pos_err = state[0:3] - state_ref[0:3]
+        att_err = quat_product(quat_inverse(state[3:7]), state_ref[3:7])[1:4]
+        vel_err = state[7:10] - state_ref[7:10]
+        ang_vel_err = state[10:13] - state_ref[10:13]
+
+        return pos_err, att_err, vel_err, ang_vel_err
+
+    def running_cost(self, state: jnp.array, inputs: jnp.array, reference) -> jnp.float32:
+        state_ref = reference[:13]
+        state_ref = state_ref.at[7:10].set(-1*(state[0:3] - state_ref[0:3]))
+        input_ref = reference[13:13+4]
+        pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, state_ref)
+        return (5 * vel_err.transpose() @ vel_err +
+                1 * ang_vel_err.transpose() @ ang_vel_err +
+                (inputs-input_ref).transpose() @ jnp.diag(jnp.array([10, 10, 10, 100])) @ (inputs-input_ref))
+
+    def final_cost(self, state, reference):
+        pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, reference[:13])
+        return (10 * pos_err.transpose() @ pos_err +
+                1 * att_err.transpose() @ att_err +
+                5 * vel_err.transpose() @ vel_err +
+                1 * ang_vel_err.transpose() @ ang_vel_err) 
+
+    def constraints(self, state, inputs, reference):
+        r = obsl.radius + 0.1                                           
+        pos = state[0:3]
+        n_obs = len(reference[17:])//3
+        obs_pos = jnp.reshape(reference[17:],(n_obs,3))
+        dist_from_obs = jnp.array([jnp.sum(abs(pos - obs) - r) for obs in obs_pos])  # l1 dist 
+         
+        constraints_neutral = jnp.array([1 for obs in obs_pos]) 
+        return constraints_neutral, dist_from_obs
+    
 def avg_dist_from_obs(state_traj, obs_ref, n_obs):
         print(f"State shape = {state_traj.shape} and ref shape = {obs_ref.shape}")
         r = 0.05            
@@ -141,14 +178,18 @@ def num_collisions(state_traj, obs_ref):
         for i in range(n_iters):
             curr_pos = state_traj[i]
             curr_obs_pos = jnp.reshape(obs_ref[i],(5,3))
-            # print(curr_pos.shape)
-            # print(curr_obs_pos[0].shape)
             dist_from_obs = jnp.array([(abs(curr_pos - obs) - r) for obs in curr_obs_pos]) 
             num_collisions += np.sum([too_close(dist) for dist in dist_from_obs])
         
         return num_collisions
 
-def get_simulation_results(sampler):
+def get_simulation_results(sampler, model, samples):
+        objective = Objective()
+        # if (model == "MPPI"):
+        #     objective = Objective()
+        # else:
+        #     objective = ConstraintFreeObjective()
+
         sim = build_all(config, objective,
                         reference,
                         custom_dynamics_fn=quadrotor_dynamics,sampler=sampler)
@@ -169,18 +210,19 @@ def get_simulation_results(sampler):
             data = file.read()
 
         sample_rejections = np.fromstring(data.strip("[]"), sep=" ", dtype=int) 
-        rejection_rate = np.mean(sample_rejections)  # calculate rejection rate
+        rejection_rate = (np.mean(sample_rejections)/5/samples)*100  # calculate rejection rate
+        
 
         with open("experiments/computation_time.txt", "r") as file:
             data = file.read()
         
         computation_times = np.fromstring(data.strip("[]"), sep=" ", dtype=int)
-        avg_comp_time = np.mean(computation_times)  # calculate average computation time
+        avg_comp_time = np.mean(1/(computation_times/1000))  # calculate control frequency
 
         return duration, avg_comp_time, smoothness, rejection_rate, obstacle_dist, n_collisions
 
 if __name__ == "__main__":
-    obsl.n_obstacles = 5
+    obsl.n_obstacles = 5    
     obsl.create_obstacles()
     obsl.load_obstacles()
 
@@ -221,28 +263,27 @@ if __name__ == "__main__":
     reference = jnp.concatenate([reference, traj],axis=1)
 
     sample_sizes = [100, 250, 500, 750, 1000, 1250, 1500]
-    objective = Objective()
 
     for n in sample_sizes:
         config.MPC.num_parallel_computations = n # set sample size
         mppi = MPPISampler(config) 
-        duration_mppi, avg_comp_time_mppi, smoothness_mppi, rej_rate_mppi, obs_dist_mppi, num_collisions_mppi = get_simulation_results(mppi)
+        duration_mppi, avg_comp_time_mppi, smoothness_mppi, rej_rate_mppi, obs_dist_mppi, num_collisions_mppi = get_simulation_results(mppi, "MPPI", n)
 
         gp = GPSampler(config)
-        duration_gp, avg_comp_time_gp, smoothness_gp, rej_rate_gp, obs_dist_gp, num_collisions_gp = get_simulation_results(gp)
+        duration_gp, avg_comp_time_gp, smoothness_gp, rej_rate_gp, obs_dist_gp, num_collisions_gp = get_simulation_results(gp, "GP", n)
 
         bnn = BNNSampler(config)
-        duration_bnn, avg_comp_time_bnn, smoothness_bnn, rej_rate_bnn, obs_dist_bnn, num_collisions_bnn= get_simulation_results(bnn)
+        duration_bnn, avg_comp_time_bnn, smoothness_bnn, rej_rate_bnn, obs_dist_bnn, num_collisions_bnn= get_simulation_results(bnn, "BNN", n)
 
-        with (open(RESULTS_PATH + "average computation time.csv", "a")) as f:  # record results
+        with (open(RESULTS_PATH + "control frequency.csv", "a")) as f:  # record results
             f.write(f"\n{n},{avg_comp_time_mppi},{avg_comp_time_gp},{avg_comp_time_bnn}")
             f.close()
 
-        with (open(RESULTS_PATH + "total duration.csv", "a")) as f:
+        with (open(RESULTS_PATH + "simulation runtime.csv", "a")) as f:
             f.write(f"\n{n},{duration_mppi},{duration_gp},{duration_bnn}")
             f.close()
 
-        with (open(RESULTS_PATH + "smoothness.csv", "a")) as f:
+        with (open(RESULTS_PATH + "average acceleration.csv", "a")) as f:
             f.write(f"\n{n},{smoothness_mppi},{smoothness_gp},{smoothness_bnn}")
             f.close()
 

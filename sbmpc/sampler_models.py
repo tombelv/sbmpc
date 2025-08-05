@@ -9,6 +9,8 @@ import numpyro
 import numpyro.distributions as dist
 import os
 
+# import matplotlib as plt
+import matplotlib.pyplot as plt
 from numpyro.infer import MCMC, NUTS, Predictive
 from numpyro import handlers
 from sbmpc import hmc
@@ -41,8 +43,8 @@ class GaussianProcessSampling():
         self.P = np.ones((self.n_samples,1,1)) 
         self.training_set = None
         self.test_set = None
-        # self.delta = 0.3 # or think in terms of  1 - delta -> see paper (constraint violation between 0 and n_obstacles)
-        self.delta = 0.5
+        self.delta = 0.3
+        # self.delta = 0.5 
         self.burn_in = 10
 
         total_samples = num_steps * num_samples
@@ -75,10 +77,11 @@ class GaussianProcessSampling():
         kernel = gpx.kernels.RBF(             
             active_dims=list(range(n_covariates)),
             variance=jnp.var(scaled_ytr),
-            lengthscale=0.1 * jnp.ones((n_covariates,)),
+            lengthscale=jnp.ones((n_covariates,)),
             )
         likelihood = gpx.likelihoods.Gaussian(num_datapoints=n_train) 
-        mean = gpx.mean_functions.Zero()  
+        # mean = gpx.mean_functions.Zero()  
+        mean = gpx.mean_functions.Constant(jnp.mean(scaled_ytr))
 
         prior = gpx.gps.Prior(mean_function = mean, kernel = kernel) 
         posterior = prior * likelihood
@@ -87,11 +90,122 @@ class GaussianProcessSampling():
         self.test_set = gpx.Dataset(X=scaled_Xte, y=scaled_yte)
 
         print("Optimising ...")
-        self.opt_posterior, history = gpx.fit_scipy( # TODO - find a way to store so actually offline. Also try fit instead of fit_scipy
+        self.opt_posterior, history = gpx.fit_scipy( 
         model=posterior,
-        objective=lambda p, d: -gpx.objectives.conjugate_loocv(p,d),   # vs conjugate loocv and others
+        objective=lambda p, d: -gpx.objectives.conjugate_mll(p,d),  
         train_data=self.training_set,
         ) 
+
+        Xte = Xte
+        yte = yte
+        latent_dist = self.opt_posterior.predict(Xte, train_data=self.training_set)
+        predictive_dist = self.opt_posterior.likelihood(latent_dist)
+
+        predictive_mean = predictive_dist.mean()
+        # print(predictive_mean)
+        predictive_std = jnp.sqrt(predictive_dist.variance())
+
+        feature_idx = 52
+        sorted_idx = jnp.argsort(Xte[:, feature_idx])
+        Xte_sorted = Xte[sorted_idx]
+        mean_sorted = predictive_mean[sorted_idx]
+        std_sorted = predictive_std[sorted_idx]
+        if yte is not None:
+            yte_sorted = yte[sorted_idx]
+
+
+        cols = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        fig, ax = plt.subplots(figsize=(8, 3), constrained_layout=True)
+
+        ax.plot(X[:, feature_idx], y, "x", label="Correct Outputs", color="green", alpha= 1)
+
+        # ax.fill_between(
+        #     Xte_sorted[:, feature_idx],
+        #     mean_sorted - 2 * std_sorted,
+        #     mean_sorted + 2 * std_sorted,
+        #     alpha=0.2,
+        #     label="Two sigma",
+        #     color=cols[1],
+        # )
+        # ax.plot(
+        #     Xte_sorted[:, feature_idx],
+        #     mean_sorted - 2 * std_sorted,
+        #     linestyle="--",
+        #     linewidth=1,
+        #     color=cols[1],
+        # )
+        # ax.plot(
+        #     Xte_sorted[:, feature_idx],
+        #     mean_sorted + 2 * std_sorted,
+        #     linestyle="--",
+        #     linewidth=1,
+        #     color=cols[1],
+        # )
+
+        if yte is not None:
+            ax.plot(
+                Xte_sorted[:, feature_idx],
+                yte_sorted,
+                label="Latent function",
+                color="blue",
+                linestyle="solid",
+                linewidth=2,
+            )
+
+        # ax.plot(
+        #     Xte_sorted[:, feature_idx],
+        #     mean_sorted,
+        #     label="Predictive mean",
+        #     color=cols[1],
+        # )
+
+        # ax.legend(loc="center left")
+        ax.legend()
+        ax.set(xlabel=f"Input", ylabel="Output", title="GP latent distribution")
+        plt.savefig("gp_plot.png")
+        plt.show()
+
+
+        # # Plotting
+        # cols = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        # latent_dist = self.opt_posterior.predict(Xte, train_data=self.training_set)
+        # predictive_dist = self.opt_posterior.likelihood(latent_dist)
+
+        # predictive_mean = predictive_dist.mean()
+        # predictive_std = jnp.sqrt(predictive_dist.variance())
+
+        # fig, ax = matplotlib.pyplot.subplots(figsize=(7.5, 2.5))
+        # print(Xte.shape)
+        # ax.plot(X, y, "x", label="Observations", color=cols[0], alpha=0.5)
+        # ax.fill_between(
+        #     Xte[:,0].squeeze(),
+        #     predictive_mean - 2 * predictive_std,
+        #     predictive_mean + 2 * predictive_std,
+        #     alpha=0.2,
+        #     label="Two sigma",
+        #     color=cols[1],
+        # )
+        # ax.plot(
+        #     Xte[:,0],
+        #     predictive_mean - 2 * predictive_std,
+        #     linestyle="--",
+        #     linewidth=1,
+        #     color=cols[1],
+        # )
+        # ax.plot(
+        #     Xte[:,0],
+        #     predictive_mean + 2 * predictive_std,
+        #     linestyle="--",
+        #     linewidth=1,
+        #     color=cols[1],
+        # )
+        # ax.plot(
+        #     Xte[:,0], yte, label="Latent function", color=cols[0], linestyle="--", linewidth=2
+        # )
+        # ax.plot(Xte[:,0], predictive_mean, label="Predictive mean", color=cols[1])
+        # ax.legend(loc="center left", bbox_to_anchor=(0.975, 0.5))
+        # matplotlib.pyplot.savefig("test.png")
+        # matplotlib.pyplot.show()
 
     @partial(jax.jit, static_argnums=(0,))
     def get_P(self, X):
@@ -105,7 +219,7 @@ class GaussianProcessSampling():
 
     @partial(jax.jit, static_argnums=(0,))
     def ravel_gp(self, X, state):
-        flat_samples = jnp.tile(X, (1,5,1))  # tile control points  - check that this is correct
+        flat_samples = jnp.tile(X, (1,5,1))  # tile control points
         x,y,z = flat_samples.shape
         flat_samples = jnp.reshape(flat_samples, (x, y*z))   # flatten
 
@@ -126,14 +240,14 @@ class GaussianProcessSampling():
         stddev = jnp.std(target)
 
         key = jax.random.key(456)
-        params_init = jnp.zeros((5,4))  # initialise control vars - TODO replace with better initial guess
+        params_init = jnp.zeros((5,4))  
 
         @partial(jax.jit, static_argnums=(0,))
         def target_pdf(params):
             return jax.scipy.stats.multivariate_normal.logpdf(x=params, mean=mean, cov=stddev).sum()
 
         # sample from target with hmc
-        chain = hmc.sample(key, params_init, target_pdf, n_steps = (self.burn_in + self.n_samples), n_leapfrog_steps=100, step_size=0.1) # try different lengths of chains - consider burn-in
+        chain = hmc.sample(key, params_init, target_pdf, n_steps = (self.burn_in + self.n_samples), n_leapfrog_steps=100, step_size=0.1) 
 
         return chain
     
@@ -165,8 +279,8 @@ class BNNSampling():
         scaled_Xtr = x_scaler.transform(Xtr)
         scaled_Xte = x_scaler.transform(Xte)
 
-        # self.delta = 0.3
-        self.delta = 0.5
+        self.delta = 0.3
+        # self.delta = 0.5
         self.burn_in = 10
         self.n_samples = n_samples
 
@@ -185,10 +299,100 @@ class BNNSampling():
 
         kernel = NUTS(model)
         mcmc = MCMC(kernel, num_warmup=100, num_samples=self.n_samples)
-        mcmc.run(jax.random.PRNGKey(0), X=X, Y=ytr)
+        # mcmc.run(jax.random.PRNGKey(0), X=X, Y=ytr)
 
-        self.posterior_samples = mcmc.get_samples()
-        self.pred_dist = Predictive(model, posterior_samples=self.posterior_samples,return_sites=["Y"]) 
+        # self.posterior_samples = mcmc.get_samples()
+        # self.pred_dist = Predictive(model, posterior_samples=self.posterior_samples,return_sites=["Y"])
+
+        rng_key, rng_key_predict = jax.random.split(jax.random.PRNGKey(0))
+        # helper function for HMC inference
+        def run_inference(model, rng_key, X, Y):
+            start = time.time()
+            kernel = NUTS(model)
+            mcmc = MCMC(
+                kernel,
+                num_warmup=100,
+                num_samples=100,
+                num_chains=1,
+                progress_bar=False if "NUMPYRO_SPHINXBUILD" in os.environ else True,
+            )
+            mcmc.run(rng_key, X, y)
+            # mcmc.print_summary()
+            # print("\nMCMC elapsed time:", time.time() - start)
+            return mcmc.get_samples()
+
+        # helper function for prediction
+        def predict(model, rng_key, samples, X):
+            model = handlers.substitute(handlers.seed(model, rng_key), samples)
+            # note that Y will be sampled in the model because we pass Y=None here
+            model_trace = handlers.trace(model).get_trace(X=X, Y=None)
+            return model_trace["Y"]["value"]
+        
+        samples = run_inference(model,  rng_key, X, y)
+        # predict Y_test at inputs X_test
+        vmap_args = (
+            samples,
+            jax.random.split(rng_key, 100 ),
+        )
+        predictions = jax.vmap(
+            lambda samples, rng_key: predict(model, rng_key, samples, X)
+        )(*vmap_args)
+        predictions = predictions[..., 0]
+
+        # # compute mean prediction and confidence interval around median
+        mean_prediction = jnp.mean(predictions, axis=0)
+        percentiles = np.percentile(predictions, [5.0, 95.0], axis=0)
+
+        # # make plots
+        # fig, ax = plt.subplots(figsize=(8, 6), constrained_layout=True)
+
+        # # plot training data
+        # ax.plot(Xte[:, 1], yte[:, 0], "kx")
+        # # plot 90% confidence level of predictions
+        # ax.fill_between(
+        #     X[:, 1], percentiles[0, :], percentiles[1, :], color="lightblue"
+        # )
+        # # plot mean prediction
+        # ax.plot(X[:, 1], mean_prediction, "blue", ls="solid", lw=2.0)
+        # ax.set(xlabel="X", ylabel="Y", title="Mean predictions with 90% CI")
+
+        # plt.savefig("bnn_plot.png")
+        # Choose the feature index to visualize
+        feature_idx = 1
+
+        # Sort X and corresponding predictions by that feature
+        sorted_idx = jnp.argsort(X[:, feature_idx])
+        X_sorted = X[sorted_idx]
+        mean_prediction_sorted = mean_prediction[sorted_idx]
+        percentiles_sorted = percentiles[:, sorted_idx]
+
+        # Plot
+        fig, ax = plt.subplots(figsize=(8, 3), constrained_layout=True)
+
+        # Plot training data
+        ax.plot(Xte[:, feature_idx], yte[:, 0], "kx", label="Correct Outputs", color="green")
+
+        # # Plot 90% confidence interval
+        # ax.fill_between(
+        #     X_sorted[:, feature_idx],
+        #     percentiles_sorted[0, :],
+        #     percentiles_sorted[1, :],
+        #     color="lightblue",
+        #     label="90% CI",
+        # )
+
+        # Plot mean prediction
+        ax.plot(
+            X_sorted[:, feature_idx],
+            mean_prediction_sorted,
+            color="blue",
+            lw=2.0,
+            label="Latent Distribution",
+        )
+
+        ax.set(xlabel=f"Input", ylabel="Output", title="BNN latent distribution")
+        ax.legend()
+        plt.savefig("bnn_plot.png")
 
 
     @partial(jax.jit, static_argnums=(0,))
@@ -237,4 +441,37 @@ class BNNSampling():
         chain = hmc.sample(key, params_init, target_pdf, n_steps = (self.burn_in + self.n_samples), n_leapfrog_steps=100, step_size=0.1) # try different lengths of chains - consider burn-in
         return chain
 
-    
+# def plot_gp():
+#     fig, ax = plt.subplots(figsize=(7.5, 2.5))
+#     ax.plot(x, y, "x", label="Observations", color=cols[0], alpha=0.5)
+#     ax.fill_between(
+#         xtest.squeeze(),
+#         predictive_mean - 2 * predictive_std,
+#         predictive_mean + 2 * predictive_std,
+#         alpha=0.2,
+#         label="Two sigma",
+#         color=cols[1],
+#     )
+#     ax.plot(
+#         xtest,
+#         predictive_mean - 2 * predictive_std,
+#         linestyle="--",
+#         linewidth=1,
+#         color=cols[1],
+#     )
+#     ax.plot(
+#         xtest,
+#         predictive_mean + 2 * predictive_std,
+#         linestyle="--",
+#         linewidth=1,
+#         color=cols[1],
+#     )
+#     ax.plot(
+#         xtest, ytest, label="Latent function", color=cols[0], linestyle="--", linewidth=2
+#     )
+#     ax.plot(xtest, predictive_mean, label="Predictive mean", color=cols[1])
+#     ax.legend(loc="center left", bbox_to_anchor=(0.975, 0.5))
+
+if __name__ == '__main__':
+    # GaussianProcessSampling(300)
+    BNNSampling(300)

@@ -19,7 +19,7 @@ jax.config.update("jax_default_matmul_precision", "high")
 
 SCENE_PATH = "examples/bitcraze_crazyflie_2/scene.xml"
 # RESULTS_PATH = "experiments/results/trajectory_planning_moving/"
-RESULTS_PATH = "experiments/more results/moving/"
+RESULTS_PATH = "experiments/more results/stationary/"
 
 INPUT_MAX = jnp.array([1, 2.5, 2.5, 2])
 INPUT_MIN = jnp.array([0, -2.5, -2.5, -2])
@@ -235,7 +235,7 @@ def get_simulation_results(sampler, model, samples):
         sim = build_all(config, objective,
                         reference,
                         custom_dynamics_fn=quadrotor_dynamics,sampler=sampler)
-
+        sim.obstacles = False
         start = time.time()
         sim.simulate()   # start simulation
         end = time.time()
@@ -294,7 +294,7 @@ if __name__ == "__main__":
     x_des = jnp.concatenate([q_des, jnp.zeros(robot_config.nv, dtype=jnp.float32)], axis=0)
 
     horizon = config.MPC.horizon+1
-    full_traj = obsl.get_obstacle_trajectory(config.sim_iterations,"circle")
+    full_traj = obsl.get_obstacle_trajectory(config.sim_iterations,"stationary")
     traj = full_traj[:horizon]  
 
     reference = jnp.concatenate((x_des, INPUT_HOVER))  
@@ -318,9 +318,9 @@ if __name__ == "__main__":
         #     f.write(f"\n{n},{smoothness_mppi},{smoothness_gp},{smoothness_bnn}")
         #     f.close()
 
-        # with (open(RESULTS_PATH + "rejection rate.csv", "a")) as f:
-        #     f.write(f"\n{n},{rej_rate_mppi},{rej_rate_gp},{rej_rate_bnn}")
-        #     f.close() 
+        with (open(RESULTS_PATH + "rejection rate.csv", "a")) as f:
+            f.write(f"\n{n},{rej_rate_mppi},{rej_rate_gp},{rej_rate_bnn}")
+            f.close() 
 
         # with (open(RESULTS_PATH + "control frequency.csv", "a")) as f:  
         #     f.write(f"\n{n},{avg_comp_time_mppi},{avg_comp_time_gp},{avg_comp_time_bnn}")

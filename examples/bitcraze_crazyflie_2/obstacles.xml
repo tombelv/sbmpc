@@ -1,6 +1,19 @@
 <mujoco model="obstacles">
-<worldbody>
-  <body name="obstacles">
-  </body>
- </worldbody>
+   <worldbody>
+      <body name="obstacle 1">
+         <geom size="0.05" type="sphere" rgba="1 0.1 0.2 1" pos="0.102 -0.063 0.444" />
+      </body>
+      <body name="obstacle 2">
+         <geom size="0.05" type="sphere" rgba="1 0.1 0.2 1" pos="0.267 -0.489 0.138" />
+      </body>
+      <body name="obstacle 3">
+         <geom size="0.05" type="sphere" rgba="1 0.1 0.2 1" pos="0.093 0.455 0.147" />
+      </body>
+      <body name="obstacle 4">
+         <geom size="0.05" type="sphere" rgba="1 0.1 0.2 1" pos="-0.419 0.354 0.174" />
+      </body>
+      <body name="obstacle 5">
+         <geom size="0.05" type="sphere" rgba="1 0.1 0.2 1" pos="-0.492 0.218 0.362" />
+      </body>
+   </worldbody>
 </mujoco>

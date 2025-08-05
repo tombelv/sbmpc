@@ -72,19 +72,19 @@ class GPSampler(Sampler):
         return optimal_samples
 
     @partial(jax.jit, static_argnums=(0,))
-    def compute_action(self, initial_guess, samples_delta, costs) -> jnp.ndarray:
+    def compute_action(self, initial_guess, samples_delta, costs, rejections) -> jnp.ndarray:
         exp_costs = self._exp_costs_shifted(costs, jnp.min(costs))
         denom = jnp.sum(exp_costs)
         weights = exp_costs / denom
         weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * samples_delta
         optimal_action = initial_guess + jnp.sum(weighted_inputs, axis=0)
-        
-        jax.experimental.io_callback(callback=self.write, num_rej=jnp.sum(jnp.where(weights <= 0, 1, 0)), 
+               
+        jax.experimental.io_callback(callback=self.write, num_rej=rejections, 
                                      result_shape_dtypes=jax.ShapeDtypeStruct(shape=(), dtype=jnp.int32)) # record rejection rate
         return optimal_action
     
-    def update(self, initial_guess, samples_delta, costs) -> jnp.ndarray:
-        optimal_action = self.compute_action(initial_guess, samples_delta, costs)
+    def update(self, initial_guess, samples_delta, costs, rejections) -> jnp.ndarray:
+        optimal_action = self.compute_action(initial_guess, samples_delta, costs, rejections)
         self._update_key()
         return optimal_action
     
@@ -110,19 +110,19 @@ class BNNSampler(Sampler):
         return optimal_samples
 
     @partial(jax.jit, static_argnums=(0,))
-    def compute_action(self, initial_guess, samples_delta, costs) -> jnp.ndarray:
+    def compute_action(self, initial_guess, samples_delta, costs, rejections) -> jnp.ndarray:
         exp_costs = self._exp_costs_shifted(costs, jnp.min(costs))
         denom = jnp.sum(exp_costs)
         weights = exp_costs / denom
         weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * samples_delta
         optimal_action = initial_guess + jnp.sum(weighted_inputs, axis=0) 
-
-        jax.experimental.io_callback(callback=self.write, num_rej=jnp.sum(jnp.where(weights <= 0, 1, 0)), 
+              
+        jax.experimental.io_callback(callback=self.write, num_rej=rejections, 
                                      result_shape_dtypes=jax.ShapeDtypeStruct(shape=(), dtype=jnp.int32)) # record rejection rate
         return optimal_action
     
-    def update(self, initial_guess, samples_delta, costs) -> jnp.ndarray:
-        optimal_action = self.compute_action(initial_guess, samples_delta, costs)
+    def update(self, initial_guess, samples_delta, costs, rejections) -> jnp.ndarray:
+        optimal_action = self.compute_action(initial_guess, samples_delta, costs, rejections)
         self._update_key()
         return optimal_action
     
@@ -147,20 +147,20 @@ class MPPISampler(Sampler):
         return sampled_variation_all
 
     @partial(jax.jit, static_argnums=(0,))
-    def compute_action(self, initial_guess, samples_delta, costs) -> jnp.ndarray:
+    def compute_action(self, initial_guess, samples_delta, costs, rejections) -> jnp.ndarray:
         exp_costs = self._exp_costs_shifted(costs, jnp.min(costs))
         denom = jnp.sum(exp_costs)
         weights = exp_costs / denom
-
-        jax.experimental.io_callback(callback=self.write, num_rej=jnp.sum(jnp.where(weights <= 0, 1, 0)), 
+        
+        jax.experimental.io_callback(callback=self.write, num_rej=rejections, 
                                      result_shape_dtypes=jax.ShapeDtypeStruct(shape=(), dtype=jnp.int32)) # record rejection rate
 
         weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * samples_delta
         optimal_action = initial_guess + jnp.sum(weighted_inputs, axis=0)
         return optimal_action
     
-    def update(self, initial_guess, samples_delta, costs) -> jnp.ndarray:
-        optimal_action = self.compute_action(initial_guess, samples_delta, costs)
+    def update(self, initial_guess, samples_delta, costs, rejections) -> jnp.ndarray:
+        optimal_action = self.compute_action(initial_guess, samples_delta, costs, rejections)
         self._update_key()
         return optimal_action
 
