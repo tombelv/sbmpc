@@ -67,17 +67,17 @@ class GPSampler(Sampler):
         sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model_nu)) * self.std_dev # sample from normal gaussian
         samples_delta = samples_delta.at[1:, :, :].set(sampled_variation_all)  
  
-        samples = self.model.sample(samples_delta,state) # skew sampling distribution and sample with hmc
-        optimal_samples = samples[-self.num_parallel_computations:,:,:] # discarding 'burn-in' samples
-        return optimal_samples
+        return samples_delta
 
     @partial(jax.jit, static_argnums=(0,))
     def compute_action(self, initial_guess, samples_delta, costs, rejections) -> jnp.ndarray:
         exp_costs = self._exp_costs_shifted(costs, jnp.min(costs))
         denom = jnp.sum(exp_costs)
         weights = exp_costs / denom
-        weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * samples_delta
-        optimal_action = initial_guess + jnp.sum(weighted_inputs, axis=0)
+        constraint_violation = self.model.get_P(samples_delta)
+        weighted_inputs = (weights[:, jnp.newaxis, jnp.newaxis] + constraint_violation) * samples_delta
+        # weighted_inputs = (weights[:, jnp.newaxis, jnp.newaxis] + constraint_violation) * samples_delta
+        weighted_inputs = (np.matmul(weights[:, jnp.newaxis, jnp.newaxis],constraint_violation)) * samples_delta
                
         jax.experimental.io_callback(callback=self.write, num_rej=rejections, 
                                      result_shape_dtypes=jax.ShapeDtypeStruct(shape=(), dtype=jnp.int32)) # record rejection rate
@@ -105,16 +105,17 @@ class BNNSampler(Sampler):
         sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model_nu)) * self.std_dev # sample from normal gaussian
         samples_delta = samples_delta.at[1:, :, :].set(sampled_variation_all)  
  
-        samples = self.model.sample(samples_delta,state) # skew sampling distribution and sample with hmc
-        optimal_samples = samples[-self.num_parallel_computations:,:,:] # discarding 'burn-in' samples
-        return optimal_samples
+        return samples_delta
 
     @partial(jax.jit, static_argnums=(0,))
     def compute_action(self, initial_guess, samples_delta, costs, rejections) -> jnp.ndarray:
         exp_costs = self._exp_costs_shifted(costs, jnp.min(costs))
         denom = jnp.sum(exp_costs)
         weights = exp_costs / denom
-        weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * samples_delta
+        constraint_violation = self.model.get_P(samples_delta)  
+        # weighted_inputs = (weights[:, jnp.newaxis, jnp.newaxis] + constraint_violation) * samples_delta
+        weighted_inputs = (np.matmul(weights[:, jnp.newaxis, jnp.newaxis],constraint_violation)) * samples_delta
+        
         optimal_action = initial_guess + jnp.sum(weighted_inputs, axis=0) 
               
         jax.experimental.io_callback(callback=self.write, num_rej=rejections, 
