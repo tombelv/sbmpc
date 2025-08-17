@@ -3,7 +3,7 @@ import jax
 import jax.experimental
 import jax.numpy as jnp
 from sbmpc.settings import Config
-from sbmpc.sampler_models import GaussianProcessSampling, BNNSampling
+from sbmpc.sampler_models import GaussianProcessModel, BNNSampling
 
 from functools import partial
 import numpy as np
