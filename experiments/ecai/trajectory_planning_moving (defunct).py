@@ -11,15 +11,13 @@ from sbmpc.simulation import build_all
 from sbmpc.geometry import skew, quat_product, quat2rotm, quat_inverse
 from sbmpc.obstacle_loader import ObstacleLoader
 from sbmpc.sampler import Sampler, MPPISampler, GPSampler, BNNSampler
-from experiments import utils
-
+# from ..utils import *
 
 os.environ['XLA_FLAGS'] = '--xla_gpu_triton_gemm_any=True'
 jax.config.update("jax_default_matmul_precision", "high")
 
 SCENE_PATH = "examples/bitcraze_crazyflie_2/scene.xml"
-# RESULTS_PATH = "experiments/results/trajectory_planning_moving/"
-RESULTS_PATH = "experiments/more results/stationary/"
+RESULTS_PATH = "experiments/ecai/results/trajectory_planning_moving/"
 
 INPUT_MAX = jnp.array([1, 2.5, 2.5, 2])
 INPUT_MIN = jnp.array([0, -2.5, -2.5, -2])
@@ -223,7 +221,7 @@ def num_collisions(state_traj, obs_ref):
         
         return num_collisions
 
-def get_simulation_results(sampler, model, samples):
+def get_simulation_results(sampler, model, samples, n_obs):
         objective = Objective()
         # objective = None
         # if (model == "MPPI"):
@@ -235,22 +233,21 @@ def get_simulation_results(sampler, model, samples):
         sim = build_all(config, objective,
                         reference,
                         custom_dynamics_fn=quadrotor_dynamics,sampler=sampler)
-        sim.obstacles = False
+
         start = time.time()
-        sim.simulate()   # start simulation
+        sim.simulate()   # start simulation NOTE not sure how valuable this metric is in simulation
         end = time.time()
     
         duration = end - start 
 
-        smoothness = utils.get_smoothness(sim.state_traj)
-        obstacle_dist = avg_dist_from_obs(sim.state_traj[:, 0:3], full_traj, 3)
+        obstacle_dist = avg_dist_from_obs(sim.state_traj[:, 0:3], full_traj, n_obs)
         n_collisions = num_collisions(sim.state_traj[:, 0:3], full_traj)
         
         with open("experiments/sample_rejections.txt", "r") as file:
             data = file.read()
 
         sample_rejections = np.fromstring(data.strip("[]"), sep=" ", dtype=int) 
-        rejection_rate = (np.mean(sample_rejections)/3/samples)*100  # calculate rejection rate
+        rejection_rate = (np.mean(sample_rejections)/n_obs/samples)*100  # calculate rejection rate
 
         with open("experiments/computation_time.txt", "r") as file:
             data = file.read()
@@ -258,8 +255,9 @@ def get_simulation_results(sampler, model, samples):
 
         avg_comp_time = np.mean(1/(computation_times/1000))  # calculate control frequency
 
-        return duration, avg_comp_time, smoothness, rejection_rate, obstacle_dist, n_collisions
+        return duration, avg_comp_time, rejection_rate, obstacle_dist, n_collisions
 
+        return
 if __name__ == "__main__":
     obsl.n_obstacles = 3
     obsl.create_obstacles()
@@ -294,33 +292,36 @@ if __name__ == "__main__":
     x_des = jnp.concatenate([q_des, jnp.zeros(robot_config.nv, dtype=jnp.float32)], axis=0)
 
     horizon = config.MPC.horizon+1
-    full_traj = obsl.get_obstacle_trajectory(config.sim_iterations,"stationary")
+    full_traj = obsl.get_obstacle_trajectory(config.sim_iterations,"circle")
     traj = full_traj[:horizon]  
 
     reference = jnp.concatenate((x_des, INPUT_HOVER))  
     reference = jnp.tile(reference, (horizon, 1))
     reference = jnp.concatenate([reference, traj],axis=1)
 
-    sample_sizes = [100, 250, 500, 750, 1000, 1250, 1500]
+    # sample_sizes = [100, 250, 500, 750, 1000, 1250, 1500]
+    sample_size = 500
+    num_obstacles = [3, 5, 7, 10]
 
-    for n in sample_sizes: # TODO - set n_obstacles to 3 on simiulation line 72 and on line 143 here!!
-        config.MPC.num_parallel_computations = n # set sample size
-        mppi = MPPISampler(config) 
-        duration_mppi, avg_comp_time_mppi, smoothness_mppi, rej_rate_mppi, obs_dist_mppi, num_collisions_mppi = get_simulation_results(mppi, "MPPI", n)
+    for n in num_obstacles[:1]: # TODO - set n_obstacles to 3 on simiulation line 72 and on line 143 here!!
+        config.MPC.num_parallel_computations = sample_size # set sample size
+        # mppi = MPPISampler(config) 
+        # duration_mppi, avg_comp_time_mppi, rej_rate_mppi, obs_dist_mppi, num_collisions_mppi = get_simulation_results(mppi, "MPPI", sample_size, n)
 
         gp = GPSampler(config)
-        duration_gp, avg_comp_time_gp, smoothness_gp, rej_rate_gp, obs_dist_gp, num_collisions_gp = get_simulation_results(gp, "GP", n)
+        duration_gp, avg_comp_time_gp, rej_rate_gp, obs_dist_gp, num_collisions_gp = get_simulation_results(gp, "GP", sample_size, n)
 
-        bnn = BNNSampler(config)
-        duration_bnn, avg_comp_time_bnn, smoothness_bnn, rej_rate_bnn, obs_dist_bnn, num_collisions_bnn  = get_simulation_results(bnn, "BNN", n)
+        # bnn = BNNSampler(config)
+        # duration_bnn, avg_comp_time_bnn, rej_rate_bnn, obs_dist_bnn, num_collisions_bnn  = get_simulation_results(bnn, "BNN", sample_size, n)
+
 
         # with (open(RESULTS_PATH + "average acceleration.csv", "a")) as f:    # record results
         #     f.write(f"\n{n},{smoothness_mppi},{smoothness_gp},{smoothness_bnn}")
         #     f.close()
 
-        with (open(RESULTS_PATH + "rejection rate.csv", "a")) as f:
-            f.write(f"\n{n},{rej_rate_mppi},{rej_rate_gp},{rej_rate_bnn}")
-            f.close() 
+        # with (open(RESULTS_PATH + "rejection rate.csv", "a")) as f:
+        #     f.write(f"\n{n},{rej_rate_mppi},{rej_rate_gp},{rej_rate_bnn}")
+        #     f.close() 
 
         # with (open(RESULTS_PATH + "control frequency.csv", "a")) as f:  
         #     f.write(f"\n{n},{avg_comp_time_mppi},{avg_comp_time_gp},{avg_comp_time_bnn}")
@@ -341,6 +342,6 @@ if __name__ == "__main__":
         # with (open(RESULTS_PATH + "rejection rate - no constraints.csv", "a")) as f:
         #     f.write(f"\n{n},{rej_rate_mppi},{rej_rate_gp},{rej_rate_bnn}")
         #     f.close() 
-
+    print("Experiments complete 👩🏾‍🔬 ")
     obsl.reset_xmls()
  

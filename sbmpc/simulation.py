@@ -70,8 +70,10 @@ class MujocoVisualizer(Visualizer):
                                                    show_right_ui=show_right_ui,
                                                    key_callback=self.key_callback)
         self.obsl = ObstacleLoader()
-        self.obsl.n_obstacles = 5
         self.obsl.n_obstacles = 3
+        # self.obsl.n_obstacles = 5
+        # self.obsl.n_obstacles = 10
+        # self.obsl.n_obstacles = 15
         self.obstacle_ref = self.obsl.get_obstacle_trajectory(num_iters, function="circle")
 
     def key_callback(self, keycode):
@@ -233,7 +235,7 @@ class Simulation(Simulator):
         self.state_traj[self.iter + 1,  :] = self.current_state_vec() #[:self.model.nx] # set only qpos and qvel
     
     def write(self):
-        f = open("/home/ubuntu/sbmpc/experiments/computation_time.txt", "w")
+        f = open("experiments/computation_time.txt", "w")
         f.write(str(np.array(self.computation_times)))
         f.close()
 

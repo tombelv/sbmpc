@@ -1,7 +1,116 @@
-numpy
-matplotlib
-jax
-scipy
-control
-mujoco-mjx
-interpax
+absl-py==2.1.0
+archspec @ file:///home/conda/feedstock_root/build_artifacts/archspec_1708969572489/work
+beartype==0.19.0
+boltons @ file:///home/conda/feedstock_root/build_artifacts/boltons_1711936407380/work
+Brotli @ file:///home/conda/feedstock_root/build_artifacts/brotli-split_1725267514489/work
+certifi @ file:///home/conda/feedstock_root/build_artifacts/certifi_1725278078093/work/certifi
+cffi @ file:///home/conda/feedstock_root/build_artifacts/cffi_1725560845041/work
+charset-normalizer @ file:///home/conda/feedstock_root/build_artifacts/charset-normalizer_1728479282467/work
+chex==0.1.88
+cloudpickle==3.1.1
+cola-ml==0.0.5
+cola-plum-dispatch==0.1.4
+colorama @ file:///home/conda/feedstock_root/build_artifacts/colorama_1666700638685/work
+conda @ file:///home/conda/feedstock_root/build_artifacts/conda_1732552623941/work
+conda-libmamba-solver @ file:///home/conda/feedstock_root/build_artifacts/conda-libmamba-solver_1727359833193/work/src
+conda-package-handling @ file:///home/conda/feedstock_root/build_artifacts/conda-package-handling_1729006966809/work
+conda_package_streaming @ file:///home/conda/feedstock_root/build_artifacts/conda-package-streaming_1729004031731/work
+contourpy==1.3.3
+control==0.10.2
+cycler==0.12.1
+decorator==5.1.1
+distro @ file:///home/conda/feedstock_root/build_artifacts/distro_1704321475663/work
+dm-tree==0.1.8
+equinox==0.11.11
+etils==1.11.0
+flax==0.10.2
+fonttools==4.59.1
+frozendict @ file:///home/conda/feedstock_root/build_artifacts/frozendict_1728841364063/work
+fsspec==2024.12.0
+gast==0.6.0
+glfw==2.9.0
+gpjax==0.9.3
+h2 @ file:///home/conda/feedstock_root/build_artifacts/h2_1634280454336/work
+hpack==4.0.0
+humanize==4.11.0
+hyperframe @ file:///home/conda/feedstock_root/build_artifacts/hyperframe_1619110129307/work
+idna @ file:///home/conda/feedstock_root/build_artifacts/idna_1726459485162/work
+importlib_resources==6.5.2
+interpax==0.3.6
+jax==0.4.38
+jax-cuda12-pjrt==0.7.0
+jax-cuda12-plugin==0.7.0
+jaxlib==0.4.38
+jaxopt==0.8.2
+jaxtyping==0.2.36
+joblib==1.5.1
+jsonpatch @ file:///home/conda/feedstock_root/build_artifacts/jsonpatch_1695536281965/work
+jsonpointer @ file:///home/conda/feedstock_root/build_artifacts/jsonpointer_1725302968769/work
+kiwisolver==1.4.9
+libmambapy @ file:///home/conda/feedstock_root/build_artifacts/mamba-split_1725066215663/work/libmambapy
+mamba @ file:///home/conda/feedstock_root/build_artifacts/mamba-split_1725066215663/work/mamba
+markdown-it-py==3.0.0
+matplotlib==3.10.5
+mdurl==0.1.2
+menuinst @ file:///home/conda/feedstock_root/build_artifacts/menuinst_1731147001619/work
+ml_dtypes==0.5.1
+msgpack==1.1.0
+mujoco==3.3.5
+mujoco-mjx==3.3.5
+multipledispatch==1.0.0
+nest-asyncio==1.6.0
+numpy==1.26.4
+numpyro==0.19.0
+nvidia-cublas-cu12==12.9.1.4
+nvidia-cuda-cupti-cu12==12.9.79
+nvidia-cuda-nvcc-cu12==12.9.86
+nvidia-cuda-nvrtc-cu12==12.9.86
+nvidia-cuda-runtime-cu12==12.9.79
+nvidia-cudnn-cu12==9.12.0.46
+nvidia-cufft-cu12==11.4.1.4
+nvidia-cusolver-cu12==11.7.5.82
+nvidia-cusparse-cu12==12.5.10.65
+nvidia-nccl-cu12==2.27.7
+nvidia-nvjitlink-cu12==12.9.86
+nvidia-nvshmem-cu12==3.3.20
+opt_einsum==3.4.0
+optax==0.2.4
+optree==0.14.0
+orbax-checkpoint==0.6.4
+packaging @ file:///home/conda/feedstock_root/build_artifacts/packaging_1718189413536/work
+pandas==2.3.1
+pillow==11.3.0
+platformdirs @ file:///home/conda/feedstock_root/build_artifacts/platformdirs_1726613481435/work
+pluggy @ file:///home/conda/feedstock_root/build_artifacts/pluggy_1713667077545/work
+protobuf==5.29.3
+pycosat @ file:///home/conda/feedstock_root/build_artifacts/pycosat_1696355778847/work
+pycparser @ file:///home/conda/feedstock_root/build_artifacts/pycparser_1711811537435/work
+Pygments==2.19.1
+PyOpenGL==3.1.10
+pyparsing==3.2.3
+PySocks @ file:///home/conda/feedstock_root/build_artifacts/pysocks_1661604839144/work
+python-dateutil==2.9.0.post0
+pytreeclass==0.11.0
+pytz==2025.2
+PyYAML==6.0.2
+requests @ file:///home/conda/feedstock_root/build_artifacts/requests_1717057054362/work
+rich==13.9.4
+ruamel.yaml @ file:///home/conda/feedstock_root/build_artifacts/ruamel.yaml_1728765017357/work
+ruamel.yaml.clib @ file:///home/conda/feedstock_root/build_artifacts/ruamel.yaml.clib_1728724472161/work
+scikit-learn==1.7.1
+scipy==1.15.1
+setuptools==75.3.0
+six==1.17.0
+tensorflow-probability==0.25.0
+tensorstore==0.1.71
+threadpoolctl==3.6.0
+toolz==1.0.0
+tqdm @ file:///home/conda/feedstock_root/build_artifacts/tqdm_1730926118411/work
+trimesh==4.7.4
+truststore @ file:///home/conda/feedstock_root/build_artifacts/truststore_1729762363021/work
+typing_extensions==4.12.2
+tzdata==2025.2
+urllib3 @ file:///home/conda/feedstock_root/build_artifacts/urllib3_1726496430923/work
+wheel==0.45.0
+zipp==3.21.0
+zstandard==0.23.0

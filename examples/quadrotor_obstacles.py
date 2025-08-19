@@ -17,7 +17,9 @@ os.environ['XLA_FLAGS'] = '--xla_gpu_triton_gemm_any=True'
 # Needed to remove warnings, to be investigated
 jax.config.update("jax_default_matmul_precision", "high")
 
-SCENE_PATH = "examples/bitcraze_crazyflie_2/scene.xml"
+# SCENE_PATH = "sbmpc/examples/bitcraze_crazyflie_2/scene.xml"
+SCENE_PATH = "/home/ubuntu/sbmpc2/sbmpc/examples/bitcraze_crazyflie_2/scene.xml"
+
 
 INPUT_MAX = jnp.array([1, 2.5, 2.5, 2])
 INPUT_MIN = jnp.array([0, -2.5, -2.5, -2])
@@ -137,7 +139,7 @@ if __name__ == "__main__":
 
     robot_config = settings.RobotConfig()
 
-    robot_config.robot_scene_path = SCENE_PATH
+    robot_config.robot_scene_path = SCENE_PATH # lol
     robot_config.nq = 7
     robot_config.nv = 6
     robot_config.nu = 4

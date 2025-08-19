@@ -1,12 +1,20 @@
 from abc import ABC, abstractmethod
+import os
+os.environ['XLA_FLAGS'] = '--xla_cpu_use_thunk_runtime=false'
 import jax
 import jax.experimental
 import jax.numpy as jnp
+from jax import lax
 from sbmpc.settings import Config
-from sbmpc.sampler_models import GaussianProcessModel, BNNSampling
+from sbmpc.gp_model import GaussianProcessModel
+from sbmpc.bnn_model import BNNModel
 
 from functools import partial
 import numpy as np
+
+cpu = jax.devices("cpu")[0]
+
+# XLA_FLAGS=--xla_cpu_use_thunk_runtime=false
 
 class Sampler(ABC):
     def __init__(self, config: Config) -> None:
@@ -48,7 +56,7 @@ class Sampler(ABC):
 
     def write(self,num_rej):
         self.num_sample_rejections.append(num_rej)
-        f = open("/home/ubuntu/sbmpc/experiments/sample_rejections.txt", "w")
+        f = open("experiments/sample_rejections.txt", "w")
         f.write(str(np.array(self.num_sample_rejections)))
         f.close()
         return num_rej
@@ -57,7 +65,7 @@ class Sampler(ABC):
 class GPSampler(Sampler):
     def __init__(self,config: Config) -> None:
         super().__init__(config)
-        self.model = GaussianProcessSampling(self.num_parallel_computations) # initialise gp
+        self.model = GaussianProcessModel(self.num_parallel_computations) # initialise gp
         self.zero_random_deviations = jnp.zeros((self.num_parallel_computations, self.num_control_points, self.model_nu), dtype=self.dtype_general)
         self.num_sample_rejections = []
 
@@ -68,20 +76,37 @@ class GPSampler(Sampler):
         samples_delta = samples_delta.at[1:, :, :].set(sampled_variation_all)  
  
         return samples_delta
-
+    
     @partial(jax.jit, static_argnums=(0,))
     def compute_action(self, initial_guess, samples_delta, costs, rejections) -> jnp.ndarray:
         exp_costs = self._exp_costs_shifted(costs, jnp.min(costs))
         denom = jnp.sum(exp_costs)
-        weights = exp_costs / denom
-        constraint_violation = self.model.get_P(samples_delta)
-        weighted_inputs = (weights[:, jnp.newaxis, jnp.newaxis] + constraint_violation) * samples_delta
-        # weighted_inputs = (weights[:, jnp.newaxis, jnp.newaxis] + constraint_violation) * samples_delta
-        weighted_inputs = (np.matmul(weights[:, jnp.newaxis, jnp.newaxis],constraint_violation)) * samples_delta
-               
-        jax.experimental.io_callback(callback=self.write, num_rej=rejections, 
-                                     result_shape_dtypes=jax.ShapeDtypeStruct(shape=(), dtype=jnp.int32)) # record rejection rate
-        return optimal_action
+        norm_weights = exp_costs / denom
+
+        N = samples_delta.shape[0]
+        A, B = samples_delta.shape[1], samples_delta.shape[2]
+        print(f"a = {A} b = {B}")
+
+        def body_fn(acc, i):
+            delta = samples_delta[i]             # shape (A, B)
+            cv = self.model.get_P(delta)         # shape (A, B)
+            print(f"CV SHAPE = {cv.shape}")
+            w = norm_weights[i]
+            acc = acc + w * cv * delta           # shape (A, B)
+            return acc, None
+
+        init_acc = jnp.zeros((A, B), dtype=samples_delta.dtype)
+        weighted_sum, _ = jax.lax.scan(body_fn, init_acc, jnp.arange(N))
+
+        jax.experimental.io_callback(
+            callback=self.write,
+            num_rej=rejections,
+            result_shape_dtypes=jax.ShapeDtypeStruct(shape=(), dtype=jnp.int32)
+        )
+
+        return initial_guess + weighted_sum
+
+
     
     def update(self, initial_guess, samples_delta, costs, rejections) -> jnp.ndarray:
         optimal_action = self.compute_action(initial_guess, samples_delta, costs, rejections)
@@ -95,7 +120,7 @@ class GPSampler(Sampler):
 class BNNSampler(Sampler):
     def __init__(self,config: Config) -> None:
         super().__init__(config)
-        self.model = BNNSampling(self.num_parallel_computations) 
+        self.model = BNNModel(self.num_parallel_computations) 
         self.zero_random_deviations = jnp.zeros((self.num_parallel_computations, self.num_control_points, self.model_nu), dtype=self.dtype_general)
         self.num_sample_rejections = []
         
@@ -113,12 +138,12 @@ class BNNSampler(Sampler):
         denom = jnp.sum(exp_costs)
         weights = exp_costs / denom
         constraint_violation = self.model.get_P(samples_delta)  
-        # weighted_inputs = (weights[:, jnp.newaxis, jnp.newaxis] + constraint_violation) * samples_delta
-        weighted_inputs = (np.matmul(weights[:, jnp.newaxis, jnp.newaxis],constraint_violation)) * samples_delta
+
+        weighted_inputs = ((weights[:, jnp.newaxis, jnp.newaxis]* constraint_violation)) * samples_delta
         
         optimal_action = initial_guess + jnp.sum(weighted_inputs, axis=0) 
               
-        jax.experimental.io_callback(callback=self.write, num_rej=rejections, 
+        jax.experimental.io_callback(callback=self.write, num_rej=np.sum(weighted_inputs), 
                                      result_shape_dtypes=jax.ShapeDtypeStruct(shape=(), dtype=jnp.int32)) # record rejection rate
         return optimal_action
     

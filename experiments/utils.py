@@ -74,7 +74,4 @@ def get_smoothness(traj):
 
     return np.mean([av_x_acc,av_y_acc,av_z_acc]) # get overall average acceleration
 
-
-# make_line_graph("experiments/results/trajectory_planning_stationary/total duration.csv")
-# make_line_graph("experiments/more results/moving/simulation runtime.csv")
-make_line_graph_2("experiments/more results/stylised/average acceleration.csv")
+#HIII

@@ -52,12 +52,16 @@ class GaussianProcessModel():
     def get_P(self, X):
         latent_dist = self.opt_posterior.predict(X, train_data=self.training_set)
 
-        predictive_dist = self.opt_posterior.likelihood(latent_dist)
-        mean = predictive_dist.mean()
-        stddev = jnp.sqrt(predictive_dist.variance())
+        # predictive_dist = self.opt_posterior.likelihood(latent_dist)
+        # mean = predictive_dist.mean()
+        # stddev = jnp.sqrt(predictive_dist.variance())
+
+        mean = latent_dist.mean()
+        stddev = latent_dist.stddev()
 
         P = norm.cdf(self.delta, loc=mean, scale=stddev)
-        return jnp.reshape(P, (-1, 1, 1))    
+        return jnp.reshape(P, (-1, 1))  
+        # return jnp.reshape(P, (-1, 1, 1))
    
 
     def train(self, dataset_path=None):
@@ -214,5 +218,5 @@ class GaussianProcessModel():
 
 if __name__ == '__main__': # run the file directly to retrain model(s)
     gp = GaussianProcessModel()
-    gp.train()
-    # print(f"MSE = {gp.evaluate_model()['mse']}")
+    # gp.train()
+    print(f"MSE = {gp.evaluate_model()['mse']}")

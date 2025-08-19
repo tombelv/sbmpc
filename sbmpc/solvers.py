@@ -140,7 +140,7 @@ class RolloutGenerator():
             cost, curr_state, _ = cost_and_state
             cost += self.dt*self.cost_and_constraints(curr_state, control_variables[idx, :], reference[idx, :])
             next_state = self.model.integrate_rollout_single(curr_state, control_variables[idx, :], self.dt)
-            rejections = jnp.sum(jnp.where((self.objective.constraints(curr_state, control_variables[idx, :], reference[idx, :])[1]) < 0, 1, 0))  
+            rejections = jnp.sum(jnp.where((self.objective.constraints(curr_state, control_variables[idx, :], reference[idx, :])[0]) < 0, 1, 0))  
             
             return cost, next_state, rejections
 
