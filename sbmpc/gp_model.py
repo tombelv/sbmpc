@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import mean_squared_error, r2_score 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from jax.scipy.stats import norm
+from jax.scipy.stats import norm 
 
 from functools import partial
 
@@ -52,17 +52,11 @@ class GaussianProcessModel():
     def get_P(self, X):
         latent_dist = self.opt_posterior.predict(X, train_data=self.training_set)
 
-        # predictive_dist = self.opt_posterior.likelihood(latent_dist)
-        # mean = predictive_dist.mean()
-        # stddev = jnp.sqrt(predictive_dist.variance())
-
         mean = latent_dist.mean()
         stddev = latent_dist.stddev()
 
-        P = norm.cdf(self.delta, loc=mean, scale=stddev)
-        return jnp.reshape(P, (-1, 1))  
-        # return jnp.reshape(P, (-1, 1, 1))
-   
+        return norm.cdf(self.delta, loc=mean, scale=stddev)
+
 
     def train(self, dataset_path=None):
         xtr, ytr, xte, yte = self._load_data(dataset_path)

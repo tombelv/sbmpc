@@ -12,29 +12,29 @@ stylised = "experiments/more results/stylised/"
 
 output_path = stylised
 
-# def make_line_graph(path):
-#     data = np.array(pd.read_csv(path,engine='python'))
-#     x = data[:,0]
-#     y1 = data[:,1]
-#     y2 = data[:,2]
-#     y3 = data[:,3]
+def make_line_graph(path):
+    data = np.array(pd.read_csv(path,engine='python'))
+    x = data[:,0]
+    y1 = data[:,1]
+    y2 = data[:,2]
+    y3 = data[:,3]
     
     
-#     plt.plot(x,y1, label='MPPI Sampler')
-#     plt.plot(x,y2, label='GP Sampler')
-#     plt.plot(x,y3, label='BNN Sampler')
+    plt.plot(x,y1, label='MPPI Sampler')
+    plt.plot(x,y2, label='GP Sampler')
+    plt.plot(x,y3, label='BNN Sampler')
                 
-#     # plt.ylim([0, 0.5])
-#     plt.xlabel("Number of samples")
+    # plt.ylim([0, 0.5])
+    plt.xlabel("Number of samples")
 
-#     # plt.ylabel(r"Average acceleration $(m/s^2)$")
-#     plt.ylabel("Total simulation time (s)")
-#     plt.title("Total Simulation Time")
+    # plt.ylabel(r"Average acceleration $(m/s^2)$")
+    plt.ylabel("Total simulation time (s)")
+    plt.title("Total Simulation Time")
 
-#     plt.legend()
-#     # plt.show()
-#     plt.savefig(output_path + "simiultation_runtime.png")
-#     plt.close()
+    plt.legend()
+    # plt.show()
+    plt.savefig(output_path + "simiultation_runtime.png")
+    plt.close()
 
 
 def make_line_graph_2(path):
@@ -73,5 +73,3 @@ def get_smoothness(traj):
     av_z_acc = np.mean(z_acc**2)
 
     return np.mean([av_x_acc,av_y_acc,av_z_acc]) # get overall average acceleration
-
-#HIII

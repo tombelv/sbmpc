@@ -12,6 +12,8 @@ from sbmpc.bnn_model import BNNModel
 from functools import partial
 import numpy as np
 
+from jax.scipy.stats import norm 
+
 cpu = jax.devices("cpu")[0]
 
 # XLA_FLAGS=--xla_cpu_use_thunk_runtime=false
@@ -66,6 +68,8 @@ class GPSampler(Sampler):
     def __init__(self,config: Config) -> None:
         super().__init__(config)
         self.model = GaussianProcessModel(self.num_parallel_computations) # initialise gp
+        self.post = self.model.opt_posterior
+        self.train = self.model.training_set
         self.zero_random_deviations = jnp.zeros((self.num_parallel_computations, self.num_control_points, self.model_nu), dtype=self.dtype_general)
         self.num_sample_rejections = []
 
@@ -74,40 +78,49 @@ class GPSampler(Sampler):
         samples_delta = self.zero_random_deviations
         sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model_nu)) * self.std_dev # sample from normal gaussian
         samples_delta = samples_delta.at[1:, :, :].set(sampled_variation_all)  
+        # print(f"NUM PARALLEL = {self.num_parallel_computations}")
  
         return samples_delta
     
     @partial(jax.jit, static_argnums=(0,))
     def compute_action(self, initial_guess, samples_delta, costs, rejections) -> jnp.ndarray:
+        # costs += self.model.get_P(samples_delta)
         exp_costs = self._exp_costs_shifted(costs, jnp.min(costs))
         denom = jnp.sum(exp_costs)
-        norm_weights = exp_costs / denom
+        weights = (exp_costs / denom) + self.model.get_P(samples_delta)
 
-        N = samples_delta.shape[0]
-        A, B = samples_delta.shape[1], samples_delta.shape[2]
-        print(f"a = {A} b = {B}")
-
-        def body_fn(acc, i):
-            delta = samples_delta[i]             # shape (A, B)
-            cv = self.model.get_P(delta)         # shape (A, B)
-            print(f"CV SHAPE = {cv.shape}")
-            w = norm_weights[i]
-            acc = acc + w * cv * delta           # shape (A, B)
-            return acc, None
-
-        init_acc = jnp.zeros((A, B), dtype=samples_delta.dtype)
-        weighted_sum, _ = jax.lax.scan(body_fn, init_acc, jnp.arange(N))
-
-        jax.experimental.io_callback(
-            callback=self.write,
-            num_rej=rejections,
-            result_shape_dtypes=jax.ShapeDtypeStruct(shape=(), dtype=jnp.int32)
-        )
-
-        return initial_guess + weighted_sum
-
-
+        weighted_inputs = ((weights[:, jnp.newaxis, jnp.newaxis])) * samples_delta
+        
+        optimal_action = initial_guess + jnp.sum(weighted_inputs, axis=0) 
+              
+        jax.experimental.io_callback(callback=self.write, num_rej=jnp.int32(rejections), 
+                                     result_shape_dtypes=jax.ShapeDtypeStruct(shape=(), dtype=jnp.int32)) # record rejection rate
+        return optimal_action   
     
+
+    # @partial(jax.jit, static_argnums=(0,))
+    # def compute_action(self, initial_guess, samples_delta, costs, rejections) -> jnp.ndarray:
+
+    #     def get_P(X):
+    #         latent_dist = self.post.predict(X, train_data=self.train)
+
+    #         mean = latent_dist.mean()
+    #         stddev = latent_dist.stddev()
+
+    #         return norm.cdf(0.3, loc=mean, scale=stddev)
+    
+    #     costs += get_P(samples_delta)
+
+    #     exp_costs = self._exp_costs_shifted(costs, jnp.min(costs))
+    #     denom = jnp.sum(exp_costs)
+    #     weights = exp_costs / denom
+        
+    #     weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * samples_delta
+    
+    #     optimal_action = initial_guess + jnp.sum(weighted_inputs, axis=0)
+    #     return optimal_action
+
+
     def update(self, initial_guess, samples_delta, costs, rejections) -> jnp.ndarray:
         optimal_action = self.compute_action(initial_guess, samples_delta, costs, rejections)
         self._update_key()
@@ -134,16 +147,16 @@ class BNNSampler(Sampler):
 
     @partial(jax.jit, static_argnums=(0,))
     def compute_action(self, initial_guess, samples_delta, costs, rejections) -> jnp.ndarray:
+        # costs += self.model.get_P(samples_delta)
         exp_costs = self._exp_costs_shifted(costs, jnp.min(costs))
         denom = jnp.sum(exp_costs)
-        weights = exp_costs / denom
-        constraint_violation = self.model.get_P(samples_delta)  
-
-        weighted_inputs = ((weights[:, jnp.newaxis, jnp.newaxis]* constraint_violation)) * samples_delta
+        # weights = exp_costs / denom
+        weights = (exp_costs / denom) * self.model.get_P(samples_delta)*3.35
+        weighted_inputs = ((weights[:, jnp.newaxis, jnp.newaxis])) * samples_delta
         
         optimal_action = initial_guess + jnp.sum(weighted_inputs, axis=0) 
               
-        jax.experimental.io_callback(callback=self.write, num_rej=np.sum(weighted_inputs), 
+        jax.experimental.io_callback(callback=self.write, num_rej=jnp.int32(rejections), 
                                      result_shape_dtypes=jax.ShapeDtypeStruct(shape=(), dtype=jnp.int32)) # record rejection rate
         return optimal_action
     
@@ -182,6 +195,40 @@ class MPPISampler(Sampler):
                                      result_shape_dtypes=jax.ShapeDtypeStruct(shape=(), dtype=jnp.int32)) # record rejection rate
 
         weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * samples_delta
+        optimal_action = initial_guess + jnp.sum(weighted_inputs, axis=0)
+        return optimal_action
+    
+    def update(self, initial_guess, samples_delta, costs, rejections) -> jnp.ndarray:
+        optimal_action = self.compute_action(initial_guess, samples_delta, costs, rejections)
+        self._update_key()
+        return optimal_action
+
+    def _exp_costs_shifted(self, costs, best_cost) -> jnp.ndarray:
+        return jnp.exp(- self.lam * (costs - best_cost))
+    
+class SimpleMPPISampler(Sampler):
+    def __init__(self, config: Config) -> None:
+        super().__init__(config)
+        self.f = None
+        self.num_sample_rejections = []
+        
+    @partial(jax.jit, static_argnums=(0,))
+    def sample_input_sequence(self, key, state) -> jnp.ndarray:  
+        # Generate random samples
+        samples_delta = self.zero_random_deviations
+        # One sample is kept equal to the guess
+        sampled_variation_all = jax.random.normal(key=key, shape=(self.num_parallel_computations-1, self.num_control_points, self.model_nu)) * self.std_dev
+        samples_delta = samples_delta.at[1:, :, :].set(sampled_variation_all)
+
+        return sampled_variation_all
+
+    @partial(jax.jit, static_argnums=(0,))
+    def compute_action(self, initial_guess, samples_delta, costs, rejections) -> jnp.ndarray:
+        jax.experimental.io_callback(callback=self.write, num_rej=rejections, 
+                                     result_shape_dtypes=jax.ShapeDtypeStruct(shape=(), dtype=jnp.int32)) # record rejection rate
+
+        # weighted_inputs = weights[:, jnp.newaxis, jnp.newaxis] * samples_delta # weights are effectively = 1
+        weighted_inputs = samples_delta
         optimal_action = initial_guess + jnp.sum(weighted_inputs, axis=0)
         return optimal_action
     

@@ -70,10 +70,10 @@ class MujocoVisualizer(Visualizer):
                                                    show_right_ui=show_right_ui,
                                                    key_callback=self.key_callback)
         self.obsl = ObstacleLoader()
-        self.obsl.n_obstacles = 3
+        # self.obsl.n_obstacles = 3 
         # self.obsl.n_obstacles = 5
-        # self.obsl.n_obstacles = 10
-        # self.obsl.n_obstacles = 15
+        self.obsl.n_obstacles = 10
+        self.obsl.n_obstacles = 15
         self.obstacle_ref = self.obsl.get_obstacle_trajectory(num_iters, function="circle")
 
     def key_callback(self, keycode):
@@ -318,7 +318,8 @@ def build_all(config: settings.Config, objective: BaseObjective,
     
     # dummy for jitting
     input_sequence = sim.controller.command(solver_x_init, reference, False).block_until_ready()
-    
+    # input_sequence = sim.controller.command(solver_x_init, reference, False)
+
     return sim
 
 

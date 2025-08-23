@@ -5,19 +5,21 @@ import matplotlib.pyplot as plt
 import sbmpc.settings as settings
 import time
 import numpy as np
+import traceback
 
 from sbmpc import BaseObjective
 from sbmpc.simulation import build_all
 from sbmpc.geometry import skew, quat_product, quat2rotm, quat_inverse
 from sbmpc.obstacle_loader import ObstacleLoader
-from sbmpc.sampler import Sampler, MPPISampler, GPSampler, BNNSampler
-# from ..utils import *
+from sbmpc.sampler import Sampler, MPPISampler, GPSampler, BNNSampler, SimpleMPPISampler
+# from experiments import utils
+
 
 os.environ['XLA_FLAGS'] = '--xla_gpu_triton_gemm_any=True'
 jax.config.update("jax_default_matmul_precision", "high")
 
 SCENE_PATH = "examples/bitcraze_crazyflie_2/scene.xml"
-RESULTS_PATH = "experiments/ecai/results/trajectory_planning_moving/"
+RESULTS_PATH = "/home/ubuntu/sbmpc/sbmpc/experiments/ecai/results/complex/"
 
 INPUT_MAX = jnp.array([1, 2.5, 2.5, 2])
 INPUT_MIN = jnp.array([0, -2.5, -2.5, -2])
@@ -32,6 +34,11 @@ SPATIAL_INTERTIA_MAT_INV = jnp.linalg.inv(SPATIAL_INTERTIA_MAT)
 
 INPUT_HOVER = jnp.array([MASS*GRAVITY, 0., 0., 0.], dtype=jnp.float32)
 obsl = ObstacleLoader()
+
+# N_OBS = 3
+# N_OBS = 5
+# N_OBS = 10
+N_OBS = 15
 
 
 @jax.jit
@@ -202,6 +209,23 @@ def avg_dist_from_obs(state_traj, obs_ref, n_obs):
         avg_dist = ((total_dist)/n_iters)/n_obs
         return avg_dist
 
+def avg_dist_from_target(state_traj, target):
+        n_iters = 100
+        target_coords = target[:3]            
+
+        total_dist = 0
+        for i in range(n_iters):
+            curr_pos = state_traj[i]
+            total_dist += jnp.sum(abs(curr_pos - target_coords)) 
+
+        avg_dist = ((total_dist)/n_iters)
+        return avg_dist
+
+def reached_target(avg_dist_from_target):
+        if avg_dist_from_target < 0.1:
+            return True
+        return False
+
 def num_collisions(state_traj, obs_ref):
         r = 0.05      
         n_iters = 500
@@ -215,39 +239,46 @@ def num_collisions(state_traj, obs_ref):
         num_collisions = 0    
         for i in range(n_iters):
             curr_pos = state_traj[i]
-            curr_obs_pos = jnp.reshape(obs_ref[i],(3,3))
+            curr_obs_pos = jnp.reshape(obs_ref[i],(N_OBS,3))
             dist_from_obs = jnp.array([(abs(curr_pos - obs) - r) for obs in curr_obs_pos]) 
             num_collisions += np.sum([too_close(dist) for dist in dist_from_obs])
         
         return num_collisions
 
-def get_simulation_results(sampler, model, samples, n_obs):
-        objective = Objective()
-        # objective = None
-        # if (model == "MPPI"):
-        #     objective = Objective()
-        # else:
-        #     objective = ConstraintFreeObjective()
-        #     print("using no constraints")
+def write_results_to_csv(n, traj, mppi_data, mppi_base_data, bnn_data):
+    metrics = {
+        "rejection rate.csv": (mppi_data[2], mppi_base_data[2], bnn_data[2]),
+        "control frequency.csv": (mppi_data[1], mppi_base_data[1], bnn_data[1]),
+        "simulation runtime.csv": (mppi_data[0], mppi_base_data[0], bnn_data[0]),
+        "average obstacle dist.csv": (mppi_data[3], mppi_base_data[3], bnn_data[3]),
+        "num collisions.csv": (mppi_data[4], mppi_base_data[4], bnn_data[4]),
+        "average target dist.csv": (mppi_data[5], mppi_base_data[5], bnn_data[5]),
+        "reached target.csv": (mppi_data[6], mppi_base_data[6], bnn_data[6])
+    }
+    
+    for filename, (mppi_val, mppi_base_val, bnn_val) in metrics.items():
+        with open(RESULTS_PATH + filename, "a") as f:
+            f.write(f"\n{n},{traj},{mppi_val},{mppi_base_val},{bnn_val}")
 
+def get_simulation_results(sampler, samples):
+        objective = Objective()
         sim = build_all(config, objective,
                         reference,
                         custom_dynamics_fn=quadrotor_dynamics,sampler=sampler)
 
         start = time.time()
-        sim.simulate()   # start simulation NOTE not sure how valuable this metric is in simulation
+        sim.simulate()   # start simulation
         end = time.time()
     
         duration = end - start 
-
-        obstacle_dist = avg_dist_from_obs(sim.state_traj[:, 0:3], full_traj, n_obs)
+        obstacle_dist = avg_dist_from_obs(sim.state_traj[:, 0:3], full_traj, N_OBS)
         n_collisions = num_collisions(sim.state_traj[:, 0:3], full_traj)
         
         with open("experiments/sample_rejections.txt", "r") as file:
             data = file.read()
 
         sample_rejections = np.fromstring(data.strip("[]"), sep=" ", dtype=int) 
-        rejection_rate = (np.mean(sample_rejections)/n_obs/samples)*100  # calculate rejection rate
+        rejection_rate = (np.mean(sample_rejections)/N_OBS/samples)*100  # calculate rejection rate (in %)
 
         with open("experiments/computation_time.txt", "r") as file:
             data = file.read()
@@ -255,93 +286,86 @@ def get_simulation_results(sampler, model, samples, n_obs):
 
         avg_comp_time = np.mean(1/(computation_times/1000))  # calculate control frequency
 
-        return duration, avg_comp_time, rejection_rate, obstacle_dist, n_collisions
+        avg_dist_from_target_ = avg_dist_from_target(sim.state_traj[:, 0:3], random_target)
+        reached_target_ = reached_target(avg_dist_from_target_)
 
-        return
+        return duration, avg_comp_time, rejection_rate, obstacle_dist, n_collisions, avg_dist_from_target_, reached_target_
+
 if __name__ == "__main__":
-    obsl.n_obstacles = 3
-    obsl.create_obstacles()
-    obsl.load_obstacles()
+    try:
+        obsl.n_obstacles = N_OBS
+        obsl.create_obstacles()
+        obsl.load_obstacles()
 
-    robot_config = settings.RobotConfig()
+        robot_config = settings.RobotConfig()
 
-    robot_config.robot_scene_path = SCENE_PATH
-    robot_config.nq = 7
-    robot_config.nv = 6
-    robot_config.nu = 4
-    robot_config.input_min = INPUT_MIN
-    robot_config.input_max = INPUT_MAX
-    robot_config.q_init = jnp.array([0., 0., 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
-    
-    config = settings.Config(robot_config)
+        robot_config.robot_scene_path = SCENE_PATH
+        robot_config.nq = 7
+        robot_config.nv = 6
+        robot_config.nu = 4
+        robot_config.input_min = INPUT_MIN
+        robot_config.input_max = INPUT_MAX
+        robot_config.q_init = jnp.array([0., 0., 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
+        
+        config = settings.Config(robot_config)
 
-    config.general.visualize = True
-    config.MPC.dt = 0.02
-    config.MPC.horizon = 25
-    config.MPC.std_dev_mppi = 0.2*jnp.array([0.1, 0.1, 0.1, 0.05])
-    config.MPC.initial_guess = INPUT_HOVER
-    config.MPC.lambda_mpc = 50.0
-    config.MPC.smoothing = "Spline"
-    config.MPC.num_control_points = 5
-    config.MPC.gains = False
+        config.general.visualize = True
+        config.MPC.dt = 0.02
+        config.MPC.horizon = 25
+        config.MPC.std_dev_mppi = 0.2*jnp.array([0.1, 0.1, 0.1, 0.05])
+        config.MPC.initial_guess = INPUT_HOVER
+        config.MPC.lambda_mpc = 50.0
+        config.MPC.smoothing = "Spline"
+        config.MPC.num_control_points = 5
+        config.MPC.gains = False
 
-    config.solver_dynamics = settings.DynamicsModel.CUSTOM
-    config.sim_dynamics = settings.DynamicsModel.MJX
+        config.solver_dynamics = settings.DynamicsModel.CUSTOM
+        config.sim_dynamics = settings.DynamicsModel.MJX
 
-    q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
-    x_des = jnp.concatenate([q_des, jnp.zeros(robot_config.nv, dtype=jnp.float32)], axis=0)
+        q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # target position
+        north = jnp.array([-0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32) 
+        east = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  
+        south = jnp.array([0.5, -0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  
+        west = jnp.array([-0.5, -0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  
+        
+        target_positions = [north, east, south, west]
+        trajectories = ["circle", "diagonal", "sine"]
 
-    horizon = config.MPC.horizon+1
-    full_traj = obsl.get_obstacle_trajectory(config.sim_iterations,"circle")
-    traj = full_traj[:horizon]  
+        horizon = config.MPC.horizon+1
+       
+        n = 500 # number of samples
 
-    reference = jnp.concatenate((x_des, INPUT_HOVER))  
-    reference = jnp.tile(reference, (horizon, 1))
-    reference = jnp.concatenate([reference, traj],axis=1)
+        for obs_traj in trajectories: 
+            random_target = target_positions[np.random.randint(0,4)]
+            x_des = jnp.concatenate([random_target, jnp.zeros(robot_config.nv, dtype=jnp.float32)], axis=0) # for each iteration, randomly move the target position
+            full_traj = obsl.get_obstacle_trajectory(config.sim_iterations,obs_traj) # change obstacle trajectory
+            traj = full_traj[:horizon]  
 
-    # sample_sizes = [100, 250, 500, 750, 1000, 1250, 1500]
-    sample_size = 500
-    num_obstacles = [3, 5, 7, 10]
+            reference = jnp.concatenate((x_des, INPUT_HOVER))  
+            reference = jnp.tile(reference, (horizon, 1))
+            reference = jnp.concatenate([reference, traj],axis=1)
 
-    for n in num_obstacles[:1]: # TODO - set n_obstacles to 3 on simiulation line 72 and on line 143 here!!
-        config.MPC.num_parallel_computations = sample_size # set sample size
-        # mppi = MPPISampler(config) 
-        # duration_mppi, avg_comp_time_mppi, rej_rate_mppi, obs_dist_mppi, num_collisions_mppi = get_simulation_results(mppi, "MPPI", sample_size, n)
+            config.MPC.num_parallel_computations = n # set sample size
 
-        gp = GPSampler(config)
-        duration_gp, avg_comp_time_gp, rej_rate_gp, obs_dist_gp, num_collisions_gp = get_simulation_results(gp, "GP", sample_size, n)
+            mppi = MPPISampler(config) 
+            duration_mppi, avg_comp_time_mppi, rej_rate_mppi, obs_dist_mppi, num_collisions_mppi, avg_target_dist_mppi, reached_target_mppi = get_simulation_results(mppi,n)
+          
+            mppi_base = SimpleMPPISampler(config)
+            duration_base, avg_comp_time_base,  rej_rate_base, obs_dist_base, num_collisions_base, avg_target_dist_base, reached_target_base = get_simulation_results(mppi_base, n)
 
-        # bnn = BNNSampler(config)
-        # duration_bnn, avg_comp_time_bnn, rej_rate_bnn, obs_dist_bnn, num_collisions_bnn  = get_simulation_results(bnn, "BNN", sample_size, n)
+            bnn = BNNSampler(config)
+            duration_bnn, avg_comp_time_bnn, rej_rate_bnn, obs_dist_bnn, num_collisions_bnn, avg_target_dist_bnn, reached_target_bnn  = get_simulation_results(bnn, n)
 
+            mppi_results = (duration_mppi, avg_comp_time_mppi, rej_rate_mppi, obs_dist_mppi, num_collisions_mppi, avg_target_dist_mppi, reached_target_mppi)
+            mppi_base_results = (duration_base, avg_comp_time_base, rej_rate_base, obs_dist_base, num_collisions_base, avg_target_dist_base, reached_target_base)
+            bnn_results = (duration_bnn, avg_comp_time_bnn, rej_rate_bnn, obs_dist_bnn, num_collisions_bnn,avg_target_dist_bnn, reached_target_bnn)
+            
+            write_results_to_csv(N_OBS, obs_traj, mppi_results, mppi_base_results, bnn_results) 
 
-        # with (open(RESULTS_PATH + "average acceleration.csv", "a")) as f:    # record results
-        #     f.write(f"\n{n},{smoothness_mppi},{smoothness_gp},{smoothness_bnn}")
-        #     f.close()
-
-        # with (open(RESULTS_PATH + "rejection rate.csv", "a")) as f:
-        #     f.write(f"\n{n},{rej_rate_mppi},{rej_rate_gp},{rej_rate_bnn}")
-        #     f.close() 
-
-        # with (open(RESULTS_PATH + "control frequency.csv", "a")) as f:  
-        #     f.write(f"\n{n},{avg_comp_time_mppi},{avg_comp_time_gp},{avg_comp_time_bnn}")
-        #     f.close()
-
-        # with (open(RESULTS_PATH + "simulation runtime.csv", "a")) as f:
-        #     f.write(f"\n{n},{duration_mppi},{duration_gp},{duration_bnn}")
-        #     f.close()
-
-        # with (open(RESULTS_PATH + "average obstacle dist.csv", "a")) as f:
-        #     f.write(f"\n{n},{obs_dist_mppi},{obs_dist_gp},{obs_dist_bnn}")
-        #     f.close()
-
-        # with (open(RESULTS_PATH + "num collisions.csv", "a")) as f:
-        #     f.write(f"\n{n},{num_collisions_mppi},{num_collisions_gp},{num_collisions_bnn}")
-        #     f.close()
-
-        # with (open(RESULTS_PATH + "rejection rate - no constraints.csv", "a")) as f:
-        #     f.write(f"\n{n},{rej_rate_mppi},{rej_rate_gp},{rej_rate_bnn}")
-        #     f.close() 
-    print("Experiments complete 👩🏾‍🔬 ")
-    obsl.reset_xmls()
+        obsl.reset_xmls()       
+        
+    except Exception as e:
+        print(f"😭 Experiments terminated prematurely. Cause: {e}")
+        traceback.print_exc()
+        obsl.reset_xmls()
  

@@ -248,9 +248,9 @@ class Controller:
         gains = self.gains_obj.cur_gains
 
         for i in range(num_steps):
-            samples_delta = self.sampler.sample_input_sequence(self.sampler.master_key, state)
-            samples, costs, gradients, rejections = self.rollout_gen.do_rollout(state, reference, optimal_samples, samples_delta, gains)
-            optimal_samples = self.sampler.update(optimal_samples, samples, costs, rejections)
+            samples_delta = self.sampler.sample_input_sequence(self.sampler.master_key, state) # generate random samples
+            samples, costs, gradients, rejections = self.rollout_gen.do_rollout(state, reference, optimal_samples, samples_delta, gains) # rollout i.e. get cost of those samples
+            optimal_samples = self.sampler.update(optimal_samples, samples, costs, rejections) # weight with cost to get optimal samples i.e. effectively reject costly samples
             # update gains
             self.gains_obj.cur_gains = self.gains_obj.gains_computation(costs, samples, gradients)
        
@@ -260,7 +260,7 @@ class Controller:
         else:
             self.sampler.optimal_samples = optimal_samples
         
-        return optimal_samples
+        return optimal_samples # i.e. input sequence
     
 
     @partial(jax.jit, static_argnums=(0,))

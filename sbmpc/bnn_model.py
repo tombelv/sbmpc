@@ -26,6 +26,8 @@ class BNNModel:
             self.scaled_Xte = model.scaled_Xte
             self.scaled_yte = model.scaled_yte
             self.y_scaler = model.y_scaler
+            self.x_scaler = model.x_scaler
+            self.input_dim = model.input_dim
         except:
             self.key = jax.random.key(random_seed)   # initialize empty if no checkpoint
             self.posterior_samples = None
@@ -34,15 +36,30 @@ class BNNModel:
             self.scaled_Xte = None
             self.scaled_yte = None
             self.y_scaler = None
+            self.x_scaler = None
+            self.input_dim = None
 
     @partial(jax.jit, static_argnums=(0,))
     def get_P(self, X):
-        predictions = self.pred_dist(rng_key=jax.random.key(1), X=X)["Y"]
+        # Return ones if model not trained
+        if self.input_dim is None or self.pred_dist is None:
+            return jnp.ones(X.shape[:-1])
+            
+        # Reshape and pad/truncate to match training dimensions
+        X_flat = X.reshape(X.shape[0], -1)
+        if X_flat.shape[1] != self.input_dim:
+            if X_flat.shape[1] < self.input_dim:
+                # Pad with zeros
+                X_flat = jnp.pad(X_flat, ((0, 0), (0, self.input_dim - X_flat.shape[1])))
+            else:
+                # Truncate
+                X_flat = X_flat[:, :self.input_dim]
+        
+        predictions = self.pred_dist(rng_key=jax.random.key(1), X=X_flat)["Y"]
         mean = jnp.mean(predictions, axis=0)
         stddev = jnp.std(predictions, axis=0)
         
-        P = norm.cdf(self.delta, loc=mean, scale=stddev)
-        return jnp.reshape(P, (-1, 1, 1))
+        return norm.cdf(self.delta, loc=mean, scale=stddev)
 
     def train(self, dataset_path=None):
         xtr, ytr, xte, yte = self._load_data(dataset_path)
@@ -67,8 +84,9 @@ class BNNModel:
 
             Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=0.5, random_state=42)
 
-            x_scaler = StandardScaler().fit(Xtr)
+            self.x_scaler = x_scaler = StandardScaler().fit(Xtr)
             self.y_scaler = y_scaler = StandardScaler().fit(ytr)
+            self.input_dim = Xtr.shape[1]
             
             self.scaled_Xte = scaled_Xte = x_scaler.transform(Xte)
             self.scaled_yte = scaled_yte = y_scaler.transform(yte)
@@ -115,7 +133,9 @@ class BNNModel:
             'delta': self.delta,
             'scaled_Xte': self.scaled_Xte,
             'scaled_yte': self.scaled_yte,
-            'y_scaler': self.y_scaler
+            'y_scaler': self.y_scaler,
+            'x_scaler': self.x_scaler,
+            'input_dim': self.input_dim
         }
         with open(f, 'wb') as f:
             pickle.dump(checkpoint, f)
@@ -133,6 +153,8 @@ class BNNModel:
         instance.scaled_Xte = checkpoint['scaled_Xte']
         instance.scaled_yte = checkpoint['scaled_yte']
         instance.y_scaler = checkpoint['y_scaler']
+        instance.x_scaler = checkpoint['x_scaler']
+        instance.input_dim = checkpoint['input_dim']
         
         def bnn_model(X, Y=None):
             n_hidden = 20
