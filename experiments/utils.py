@@ -6,7 +6,7 @@ moving = "/home/ubuntu/sbmpc/sbmpc/experiments/ecai/results/moving/"
 stationary = "/home/ubuntu/sbmpc/sbmpc/experiments/ecai/results/stationary/"
 complex = "/home/ubuntu/sbmpc/sbmpc/experiments/ecai/results/complex/"
 
-output_path = stationary
+output_path = complex
 
 def make_line_graph(path, plot, unit, method):
     data = np.array(pd.read_csv(path,engine='python'))
@@ -33,4 +33,4 @@ def make_line_graph(path, plot, unit, method):
     plt.close()
 
 
-make_line_graph(f"{output_path}simulation runtime.csv", "Simulation Runtime", "%", "penalty")
+make_line_graph(f"{output_path}average target dist.csv", "Distance from Target", "m", "penalty")
