@@ -195,5 +195,5 @@ if __name__ == '__main__':
     bnn = BNNModel()
     bnn.train()
     
-    # print(f"BNN R² = {bnn.evaluate_model()['r2']:.4f}")
-    # print(f"BNN MSE = {bnn.evaluate_model()['mse']:.4f}")
+    print(f"BNN R² = {bnn.evaluate_model()['r2']:.4f}")
+    print(f"BNN MSE = {bnn.evaluate_model()['mse']:.4f}")
