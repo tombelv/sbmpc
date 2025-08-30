@@ -40,7 +40,7 @@
     <motor ctrllimited="true" ctrlrange="-1 1"/>
   </default>
   <size nstack="300000" nuser_geom="1"/>
-  <option gravity="0 0 -9.81" timestep="0.01" iterations="4" />
+  <option gravity="0 0 -9.81" timestep="0.01" solver="Newton" iterations="1" ls_iterations="4"/>
   <custom>
     <!-- brax custom params -->
     <numeric data="10000" name="constraint_limit_stiffness"/>
