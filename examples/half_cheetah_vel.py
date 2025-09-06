@@ -61,7 +61,7 @@ if __name__ == "__main__":
     robot_config.q_init = jnp.array(q0)
 
     config = Config(robot_config)
-    config.general.visualize = True
+    config.general.visualize = False
     config.MPC.dt = 0.02
     config.MPC.horizon = 30
     config.MPC.std_dev_mppi = 0.2*jnp.ones(robot_config.nu)
@@ -76,6 +76,8 @@ if __name__ == "__main__":
     config.sim_dynamics = DynamicsModel.MJX
 
     config.sim_iterations = 500
+
+    config.sim.dt = 0.01
 
     # Reference for the end-effector position
     final_com_pos = jnp.array([0.8, 0., 0.], dtype=jnp.float32)
@@ -102,4 +104,3 @@ if __name__ == "__main__":
     plt.show()
 
     plt.show()
-

@@ -118,8 +118,9 @@ if __name__ == "__main__":
     robot_config.q_init = jnp.array([0., 0., 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
 
     config = settings.Config(robot_config)
+    config.sim.dt = 0.02
 
-    config.general.visualize = True
+    config.general.visualize = False
     config.MPC.dt = 0.02
     config.MPC.horizon = 25
     config.MPC.std_dev_mppi = 0.2*jnp.array([0.1, 0.1, 0.1, 0.05])
@@ -130,10 +131,10 @@ if __name__ == "__main__":
     config.MPC.num_control_points = 5
     config.MPC.gains = False
 
-    config.solver_dynamics = settings.DynamicsModel.CUSTOM
-    config.sim_dynamics = settings.DynamicsModel.CUSTOM
+    config.solver_dynamics = settings.DynamicsModel.MJX
+    config.sim_dynamics = settings.DynamicsModel.MJX
 
-    config.sim_iterations = 200  # number of simulation iterations
+    config.sim_iterations = 300  # number of simulation iterations
 
     q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
     x_des = jnp.concatenate([q_des, jnp.zeros(robot_config.nv, dtype=jnp.float32)], axis=0)
@@ -142,7 +143,7 @@ if __name__ == "__main__":
 
     objective = Objective()
 
-    sim = build_all(config, 
+    sim = build_all(config,
                     objective,
                     reference,
                     custom_dynamics_fn=quadrotor_dynamics,
@@ -150,18 +151,18 @@ if __name__ == "__main__":
 
     sim.simulate()
 
-    # time_vect = config.MPC.dt*jnp.arange(sim.state_traj.shape[0])
-    # ax = plt.figure().add_subplot(projection='3d')
-    # # Plot x-y-z position of the robot
-    # ax.plot(sim.state_traj[:, 0], sim.state_traj[:, 1], sim.state_traj[:, 2])
-    # plt.show()
-    # plt.plot(time_vect, sim.state_traj[:, 0:3])
-    # plt.legend(["x", "y", "z"])
-    # plt.grid()
-    # plt.show()
-    # # Plot the input trajectory
-    # plt.plot(time_vect[:-1], sim.input_traj)
-    # plt.legend(["F", "t_x", "t_y", "t_z"])
-    # plt.grid()
+    time_vect = config.MPC.dt*jnp.arange(sim.state_traj.shape[0])
+    ax = plt.figure().add_subplot(projection='3d')
+    # Plot x-y-z position of the robot
+    ax.plot(sim.state_traj[:, 0], sim.state_traj[:, 1], sim.state_traj[:, 2])
+    plt.show()
+    plt.plot(time_vect, sim.state_traj[:, 0:3])
+    plt.legend(["x", "y", "z"])
+    plt.grid()
+    plt.show()
+    # Plot the input trajectory
+    plt.plot(time_vect[:-1], sim.input_traj)
+    plt.legend(["F", "t_x", "t_y", "t_z"])
+    plt.grid()
 
-    # plt.show()
+    plt.show()

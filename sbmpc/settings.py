@@ -1,5 +1,6 @@
 import os
 from enum import Enum
+from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
@@ -61,7 +62,7 @@ class RobotConfig:
         if not isinstance(value, bool):
             raise ValueError("bool type is expected")
         self._mjx_kinematic = value
-    
+
     @property
     def nq(self):
         return self._nq
@@ -73,7 +74,7 @@ class RobotConfig:
         self._nq = value
         if self._nv is not None:
             self._nx = self._nq + self._nv
-    
+
     @property
     def nv(self):
         return self._nv
@@ -85,15 +86,15 @@ class RobotConfig:
         self._nv = value
         if self._nq is not None:
             self._nx = self._nq + self._nv
-    
+
     @property
     def nx(self):
         return self._nx
-    
+
     @property
     def input_min(self):
         return self._input_min
-    
+
     @input_min.setter
     def input_min(self, value: Array):
         if not isinstance(value, Array):
@@ -101,11 +102,11 @@ class RobotConfig:
         if len(value) != self._nu:
             raise ValueError("length must match nu")
         self._input_min = value
-    
+
     @property
     def input_max(self):
         return self._input_max
-    
+
     @input_max.setter
     def input_max(self, value: Array):
         if not isinstance(value, Array):
@@ -113,7 +114,7 @@ class RobotConfig:
         if len(value) != self._nu:
             raise ValueError("length must match nu")
         self._input_max = value
-    
+
 
 
     @property
@@ -126,7 +127,7 @@ class RobotConfig:
             raise ValueError("int type is expected")
         self._nu = value
         self.__init_input_limits_from_nu()
-    
+
     @property
     def q_init(self):
         return self._q_init
@@ -153,7 +154,7 @@ class MPCConfig:
 
         self._std_dev_mppi = jnp.zeros(config.nu)
         self._initial_guess = jnp.zeros(config.nu)
-        
+
 
     @property
     def dt(self):
@@ -186,7 +187,7 @@ class MPCConfig:
         if not isinstance(value, int):
             raise ValueError("int type is expected")
         self._num_parallel_computations = value
-    
+
     @property
     def lambda_mpc(self):
         return self._lambda_mpc
@@ -331,9 +332,17 @@ class GeneralConfig:
             raise ValueError(f"value must be in list of types: {MODEL_PARAMETRIC_INTEGRATOR_TYPES}")
         self._integrator_type = value
 
+@jax.tree_util.register_dataclass
+@dataclass
+class SimOptions:
+    dt: float = 0.001
+
+
+
 class Config:
     def __init__(self, robot_config: RobotConfig):
         self.general = GeneralConfig()
+        self.sim = SimOptions()
 
         self.robot = robot_config
 
@@ -348,11 +357,9 @@ class Config:
     @property
     def solver_dynamics(self):
         return self._solver_dynamics
-    
+
     @solver_dynamics.setter
     def solver_dynamics(self, value: DynamicsModel):
         if not isinstance(value, DynamicsModel):
             raise ValueError("DynamicsModel type is expected")
         self._solver_dynamics = value
-
-
