@@ -35,7 +35,7 @@ class Objective(BaseObjective):
         return pos_cost + 0.0001*inputs.transpose() @ inputs
 
     def final_cost(self, state, reference):
-        pos_cost = 10*((state[0]-reference[0])**2).sum()  # desired forward position
+        pos_cost = 100*((state[0]-reference[0])**2).sum()  # desired forward position
         #pos_cost = 10*((state[1]-reference[0])**2).sum()  # desired forward position
         #vel_cost = 10*((state[3]-reference[0])**2).sum()  # desired forward velocity
         #return 100*vel_cost
@@ -64,10 +64,10 @@ if __name__ == "__main__":
     config = Config(robot_config)
     config.general.visualize = True
     config.MPC.dt = 0.02
-    config.MPC.horizon = 100
-    config.MPC.std_dev_mppi = 0.2*jnp.ones(robot_config.nu)
-    config.MPC.num_parallel_computations = 1500
-    config.MPC.lambda_mpc = 100.0
+    config.MPC.horizon = 50
+    config.MPC.std_dev_mppi = 10*jnp.ones(robot_config.nu)
+    config.MPC.num_parallel_computations = 2000
+    config.MPC.lambda_mpc = 10.0
     #config.MPC.smoothing = "Spline"
     #config.MPC.num_control_points = 5
     config.MPC.num_control_points = config.MPC.horizon
@@ -76,9 +76,9 @@ if __name__ == "__main__":
     config.solver_dynamics = DynamicsModel.MJX
     config.sim_dynamics = DynamicsModel.MJX
 
-    config.sim_iterations = 1500
+    config.sim_iterations = 200
 
-    config.sim.dt = 0.02
+    config.sim.dt = 0.002
 
     # Reference for the end-effector position
     desired_com_pos = jnp.array([0.5], dtype=jnp.float32)
@@ -100,7 +100,7 @@ if __name__ == "__main__":
 
     import matplotlib.pyplot as plt
     time_vect = config.MPC.dt*jnp.arange(sim.state_traj.shape[0])
-    plt.plot(time_vect, sim.state_traj[:, 9])
+    plt.plot(time_vect, sim.state_traj[:, 0])
     plt.legend(["v_x"])
     plt.grid()
     plt.show()

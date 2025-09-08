@@ -240,7 +240,7 @@ class Simulation(Simulator):
         gains = self.controller.gains
 
         # Simulate the dynamics
-        N = 4
+        N = 10
         current_state_vec_initial = self.current_state_vec().copy()
         reference_state_vec_temp = copy.deepcopy(current_state_vec_initial)
         #reference_state_vec_temp[9] = self.const_reference[0]
@@ -249,9 +249,9 @@ class Simulation(Simulator):
 
             current_state_vec_temp = jnp.concatenate([self.current_state.qpos, self.current_state.qvel])
             current_state_vec_temp = np.array(current_state_vec_temp)
-            
+
             additional_input = gains @ (reference_state_vec_temp - current_state_vec_temp)
-            print("additional input: ", additional_input)            
+            print("additional input: ", additional_input)
 
             self.current_state = self.model.integrate_sim(self.current_state, ctrl + jnp.array(additional_input), self.dt)
 
