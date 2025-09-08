@@ -32,14 +32,14 @@ class Objective(BaseObjective):
         #pos_cost = 10*((state[1]-reference[0])**2).sum()  # desired forward position
         #vel_cost = 10*((state[3]-reference[0])**2).sum()  # desired forward velocity
         #return vel_cost + 0.01*inputs.transpose() @ inputs
-        return pos_cost + 0.01*inputs.transpose() @ inputs
+        return pos_cost + 0.0001*inputs.transpose() @ inputs
 
     def final_cost(self, state, reference):
         pos_cost = 10*((state[0]-reference[0])**2).sum()  # desired forward position
         #pos_cost = 10*((state[1]-reference[0])**2).sum()  # desired forward position
         #vel_cost = 10*((state[3]-reference[0])**2).sum()  # desired forward velocity
         #return 100*vel_cost
-        return 100*pos_cost
+        return pos_cost
 
 
 def post_update(sim):
@@ -64,7 +64,7 @@ if __name__ == "__main__":
     config = Config(robot_config)
     config.general.visualize = True
     config.MPC.dt = 0.02
-    config.MPC.horizon = 30
+    config.MPC.horizon = 100
     config.MPC.std_dev_mppi = 0.2*jnp.ones(robot_config.nu)
     config.MPC.num_parallel_computations = 1500
     config.MPC.lambda_mpc = 100.0
@@ -81,7 +81,7 @@ if __name__ == "__main__":
     config.sim.dt = 0.02
 
     # Reference for the end-effector position
-    desired_com_pos = jnp.array([2], dtype=jnp.float32)
+    desired_com_pos = jnp.array([0.5], dtype=jnp.float32)
     #desired_com_vel = jnp.array([0.5], dtype=jnp.float32)
 
     objective = Objective(system)

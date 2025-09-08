@@ -13,14 +13,14 @@
             <!--joint axis="1 0 0" pos="0 0 -0.1" limited="false" name="rootx" type="slide"/-->
             <joint axis="0 0 1" pos="0 0 -0.1" limited="false" name="rootz" type="slide"/>
             <geom name="ball_geom" size="0.1" type="sphere" conaffinity="0" contype="1"/>
-            <body name="leg_push" pos="0 0 0" axisangle ="0 1 0 0.5">
+            <body name="leg_push" pos="0 0 0">
                 <joint axis="0 0 -1" name="leg_joint_push" pos="0 0 0" range="0.0 0.1" type="slide"/>
                 <geom friction="0.8" name="leg_geom" size="0.025 0.075" type="capsule" conaffinity="0" contype="1"/>
             </body>
         </body>
     </worldbody>
     <actuator>
-        <motor ctrllimited="true" ctrlrange="0.0 2.0" gear="200.0" joint="leg_joint_push"/>
+        <motor ctrllimited="true" ctrlrange="0.0 10.0" gear="200.0" joint="leg_joint_push"/>
     </actuator>
     <asset>
         <texture type="skybox" builtin="gradient" rgb1=".4 .5 .6" rgb2="0 0 0"
