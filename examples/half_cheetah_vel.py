@@ -66,14 +66,14 @@ if __name__ == "__main__":
     config = Config(robot_config)
     config.general.visualize = False
     config.MPC.dt = 0.02
-    config.MPC.horizon = 10
+    config.MPC.horizon = 30
     config.MPC.std_dev_mppi = 0.2*jnp.ones(robot_config.nu)
-    config.MPC.num_parallel_computations = 500
+    config.MPC.num_parallel_computations = 1500
     config.MPC.lambda_mpc = 100.0
     #config.MPC.smoothing = "Spline"
     #config.MPC.num_control_points = 5
     config.MPC.num_control_points = config.MPC.horizon
-    config.MPC.gains = False
+    config.MPC.gains = True
 
     config.solver_dynamics = DynamicsModel.MJX
     config.sim_dynamics = DynamicsModel.MJX
