@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import numpy as np
+import copy
 import jax.numpy as jnp
 import mujoco
 import mujoco.mjx as mjx
@@ -236,9 +237,24 @@ class Simulation(Simulator):
         print("computation time: {:.3f} [ms]".format(1e-6 * (time.time_ns() - time_start)))
 
         self.input_traj[self.iter, :] = ctrl
+        gains = self.controller.gains
 
         # Simulate the dynamics
-        self.current_state = self.model.integrate_sim(self.current_state, ctrl, self.dt)
+        N = 4
+        current_state_vec_initial = self.current_state_vec().copy()
+        reference_state_vec_temp = copy.deepcopy(current_state_vec_initial)
+        #reference_state_vec_temp[9] = self.const_reference[0]
+        for j in range(N):
+            #self.current_state = self.model.integrate_sim(self.current_state, ctrl, self.dt)
+
+            current_state_vec_temp = jnp.concatenate([self.current_state.qpos, self.current_state.qvel])
+            current_state_vec_temp = np.array(current_state_vec_temp)
+            
+            additional_input = gains @ (reference_state_vec_temp - current_state_vec_temp)
+            print("additional input: ", additional_input)            
+
+            self.current_state = self.model.integrate_sim(self.current_state, ctrl + jnp.array(additional_input), self.dt)
+
         self.state_traj[self.iter + 1,  :] = self.current_state_vec() #[:self.model.nx] # set only qpos and qvel
 
 

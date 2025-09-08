@@ -16,6 +16,8 @@ os.environ['XLA_FLAGS'] = (
         '--xla_gpu_triton_gemm_any=True '
     )
 
+os.environ['CUDA_VISIBLE_DEVICES'] = ''
+
 SCENE_PATH = "examples/half_cheetah/half_cheetah.xml"
 
 
@@ -58,26 +60,27 @@ if __name__ == "__main__":
     robot_config.mjx_kinematic = False
     robot_config.nu = system.mj_model.nu
     robot_config.nq = system.mj_model.nq
+    robot_config.nv = system.mj_model.nv
     robot_config.q_init = jnp.array(q0)
 
     config = Config(robot_config)
     config.general.visualize = False
     config.MPC.dt = 0.02
-    config.MPC.horizon = 30
+    config.MPC.horizon = 10
     config.MPC.std_dev_mppi = 0.2*jnp.ones(robot_config.nu)
     config.MPC.num_parallel_computations = 500
     config.MPC.lambda_mpc = 100.0
     #config.MPC.smoothing = "Spline"
     #config.MPC.num_control_points = 5
     config.MPC.num_control_points = config.MPC.horizon
-    config.MPC.gains = True
+    config.MPC.gains = False
 
     config.solver_dynamics = DynamicsModel.MJX
     config.sim_dynamics = DynamicsModel.MJX
 
     config.sim_iterations = 500
 
-    config.sim.dt = 0.01
+    config.sim.dt = 0.005
 
     # Reference for the end-effector position
     final_com_pos = jnp.array([0.8, 0., 0.], dtype=jnp.float32)
@@ -97,7 +100,6 @@ if __name__ == "__main__":
 
     import matplotlib.pyplot as plt
     time_vect = config.MPC.dt*jnp.arange(sim.state_traj.shape[0])
-    breakpoint()
     plt.plot(time_vect, sim.state_traj[:, 9])
     plt.legend(["v_x"])
     plt.grid()
