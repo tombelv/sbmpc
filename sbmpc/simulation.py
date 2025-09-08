@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 import copy
 import jax.numpy as jnp
+import jax
 import mujoco
 import mujoco.mjx as mjx
 import mujoco.viewer
@@ -243,17 +244,21 @@ class Simulation(Simulator):
         N = 10
         current_state_vec_initial = self.current_state_vec().copy()
         reference_state_vec_temp = copy.deepcopy(current_state_vec_initial)
+        current_state_temp = copy.deepcopy(self.current_state)
         #reference_state_vec_temp[9] = self.const_reference[0]
         for j in range(N):
             #self.current_state = self.model.integrate_sim(self.current_state, ctrl, self.dt)
 
-            current_state_vec_temp = jnp.concatenate([self.current_state.qpos, self.current_state.qvel])
-            current_state_vec_temp = np.array(current_state_vec_temp)
+            current_state_vec_temp = jnp.concatenate([current_state_temp.qpos, current_state_temp.qvel])
+            # current_state_vec_temp = np.array(current_state_vec_temp)
 
             additional_input = gains @ (reference_state_vec_temp - current_state_vec_temp)
             print("additional input: ", additional_input)
 
             self.current_state = self.model.integrate_sim(self.current_state, ctrl + jnp.array(additional_input), self.dt)
+            self.current_state.qvel += jax.random.normal(key = self.controller.sampler.master_key, shape = self.current_state.qvel.shape)*0.0025
+
+            current_state_temp = self.model.integrate_sim(current_state_temp, ctrl, self.dt)
 
         self.state_traj[self.iter + 1,  :] = self.current_state_vec() #[:self.model.nx] # set only qpos and qvel
 

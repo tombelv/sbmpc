@@ -11,6 +11,7 @@ from sbmpc.simulation import build_all
 
 import mujoco.mjx as mjx
 import mujoco
+from operator import truediv
 
 os.environ['XLA_FLAGS'] = (
         '--xla_gpu_triton_gemm_any=True '
@@ -28,11 +29,8 @@ class Objective(BaseObjective):
 
 
     def running_cost(self, state: jnp.array, inputs: jnp.array, reference) -> jnp.float32:
-        pos_cost = 10*((state[0]-reference[0])**2).sum()  # desired forward position
-        #pos_cost = 10*((state[1]-reference[0])**2).sum()  # desired forward position
-        #vel_cost = 10*((state[3]-reference[0])**2).sum()  # desired forward velocity
-        #return vel_cost + 0.01*inputs.transpose() @ inputs
-        return pos_cost + 0.0001*inputs.transpose() @ inputs
+        pos_cost = ((state[0]-reference[0])**2).sum()
+        return 10*pos_cost + 0.0001*inputs.transpose() @ inputs
 
     def final_cost(self, state, reference):
         pos_cost = 100*((state[0]-reference[0])**2).sum()  # desired forward position
@@ -66,10 +64,10 @@ if __name__ == "__main__":
     config.MPC.dt = 0.02
     config.MPC.horizon = 50
     config.MPC.std_dev_mppi = 10*jnp.ones(robot_config.nu)
-    config.MPC.num_parallel_computations = 2000
-    config.MPC.lambda_mpc = 10.0
-    #config.MPC.smoothing = "Spline"
-    #config.MPC.num_control_points = 5
+    config.MPC.num_parallel_computations = 1000
+    config.MPC.lambda_mpc = 5.0
+    config.MPC.smoothing = "Spline"
+    config.MPC.num_control_points = 5
     config.MPC.num_control_points = config.MPC.horizon
     config.MPC.gains = False
 
