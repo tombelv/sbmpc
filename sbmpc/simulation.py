@@ -264,8 +264,8 @@ class Simulation(Simulator):
 
 
 def build_custom_model(custom_dynamics_fn: Callable, nq: int, nv: int, nu: int, input_min: jnp.array, input_max: jnp.array,
-                        q_init: jnp.array, integrator_type: str ="si_euler", obstacle_loader: ObstacleLoader = None) -> Tuple[BaseModel, jnp.array, jnp.array]:
-    system = Model(custom_dynamics_fn, nq=nq, nv=nv, nu=nu, input_bounds=[input_min, input_max], integrator_type=integrator_type)
+                        q_init: jnp.array, integrator_type: str ="si_euler", obstacle_loader: ObstacleLoader = None, nominal_params=jnp.array([])) -> Tuple[BaseModel, jnp.array, jnp.array]:
+    system = Model(custom_dynamics_fn, nq=nq, nv=nv, nu=nu, input_bounds=[input_min, input_max], integrator_type=integrator_type, nominal_parameters=nominal_params)
     x_init = jnp.concatenate([q_init, jnp.zeros(system.nv, dtype=jnp.float32)], axis=0)
     state_init = x_init
     return system, x_init, state_init

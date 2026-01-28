@@ -5,11 +5,12 @@ import jax
 import jax.numpy as jnp
 
 import matplotlib.pyplot as plt
+from scipy import integrate
 
 from sbmpc import BaseObjective
 import sbmpc.settings as settings
 
-from sbmpc.simulation import build_all
+from sbmpc.simulation import build_all, build_custom_model, build_mjx_model
 from sbmpc.geometry import skew, quat_product, quat2rotm, quat_inverse
 
 os.environ['XLA_FLAGS'] = '--xla_gpu_triton_gemm_any=True'
@@ -57,11 +58,15 @@ def quadrotor_dynamics(state: jnp.array, inputs: jnp.array, params: jnp.array) -
     orientation_mat = quat2rotm(quat)
     ang_vel_quat = jnp.array([0., state[10], state[11], state[12]])
 
-    total_force = jnp.array([0., 0., inputs[0]]) - MASS*GRAVITY*orientation_mat[2, :]  # transpose + 3rd col = 3rd row
+    total_force = jnp.array([0., 0., inputs[0]]) - params[0]*GRAVITY*orientation_mat[2, :]  # transpose + 3rd col = 3rd row
 
-    total_torque = 1e-3*inputs[1:4] - skew(ang_vel) @ INERTIA_MAT @ ang_vel  # multiplication by normalization factor
+    inertia = jnp.diag(params[1])
+    spat_inertia = jnp.diag(jnp.concatenate([params[0]*jnp.ones(3, dtype=jnp.float32), params[1]]))
+    spat_inertia_inv = jnp.linalg.inv(spat_inertia)
 
-    acc = SPATIAL_INTERTIA_MAT_INV @ jnp.concatenate([total_force, total_torque])
+    total_torque = 1e-3*inputs[1:4] - skew(ang_vel) @ inertia @ ang_vel  # multiplication by normalization factor
+
+    acc = spat_inertia_inv @ jnp.concatenate([total_force, total_torque])
 
     state_dot = jnp.concatenate([state[7:10],
                                  0.5 * quat_product(quat, ang_vel_quat),
@@ -121,6 +126,7 @@ if __name__ == "__main__":
     config.sim.dt = 0.02
 
     config.general.visualize = False
+    # config.general.integrator_type = "rk4"
     config.MPC.dt = 0.02
     config.MPC.horizon = 25
     config.MPC.std_dev_mppi = 0.2*jnp.array([0.1, 0.1, 0.1, 0.05])
@@ -131,8 +137,8 @@ if __name__ == "__main__":
     config.MPC.num_control_points = 5
     config.MPC.gains = False
 
-    config.solver_dynamics = settings.DynamicsModel.MJX
-    config.sim_dynamics = settings.DynamicsModel.MJX
+    config.solver_dynamics = settings.DynamicsModel.CUSTOM
+    config.sim_dynamics = settings.DynamicsModel.CUSTOM
 
     config.sim_iterations = 300  # number of simulation iterations
 
@@ -143,26 +149,32 @@ if __name__ == "__main__":
 
     objective = Objective()
 
-    sim = build_all(config,
-                    objective,
-                    reference,
-                    custom_dynamics_fn=quadrotor_dynamics,
-                    obstacles=False)
+    # sim = build_all(config,
+    #                 objective,
+    #                 reference,
+    #                 custom_dynamics_fn=quadrotor_dynamics,
+    #                 obstacles=False,
+    #                 nominal_params = (MASS, INERTIA))
 
-    sim.simulate()
+    model = build_custom_model(quadrotor_dynamics,
+                               nq=robot_config.nq,
+                               nv=robot_config.nv,
+                               nu=robot_config.nu,
+                               input_min=robot_config.input_min,
+                               input_max=robot_config.input_max,
+                               q_init=robot_config.q_init,
+                               integrator_type=config.general.integrator_type,
+                               nominal_params=(MASS, INERTIA))[0]
 
-    time_vect = config.MPC.dt*jnp.arange(sim.state_traj.shape[0])
-    ax = plt.figure().add_subplot(projection='3d')
-    # Plot x-y-z position of the robot
-    ax.plot(sim.state_traj[:, 0], sim.state_traj[:, 1], sim.state_traj[:, 2])
-    plt.show()
-    plt.plot(time_vect, sim.state_traj[:, 0:3])
-    plt.legend(["x", "y", "z"])
-    plt.grid()
-    plt.show()
-    # Plot the input trajectory
-    plt.plot(time_vect[:-1], sim.input_traj)
-    plt.legend(["F", "t_x", "t_y", "t_z"])
-    plt.grid()
+    dfdp = jax.jacfwd(model.integrate_parametric, argnums=2)
 
-    plt.show()
+    print(model.integrate_parametric(x_des, jnp.ones(4), (MASS, INERTIA), 0.02))
+    print(dfdp(x_des, jnp.ones(4), (MASS, INERTIA), 0.02))
+
+
+    model_mjx = build_mjx_model(config)[0]
+    
+    dfdp_mjx = jax.jacfwd(model_mjx.integrate_parametric, argnums=2)
+
+    print(model_mjx.integrate_parametric(x_des, jnp.ones(4), (2*MASS, INERTIA), 0.02))
+    print(dfdp_mjx(x_des, jnp.ones(4), (2*MASS, INERTIA), 0.02))

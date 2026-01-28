@@ -243,6 +243,7 @@ class Controller:
         for i in range(num_steps):
             samples_delta = self.sampler.sample_input_sequence(self.sampler.master_key)
             samples, costs, gradients = self.rollout_gen.do_rollout(state, reference, optimal_samples, samples_delta, gains)
+            print("mean cost:", jnp.mean(costs), " min cost:", jnp.min(costs))
             optimal_samples = self.sampler.update(optimal_samples, samples, costs)
             # update gains
             self.gains_obj.cur_gains = self.gains_obj.gains_computation(costs, samples, gradients)

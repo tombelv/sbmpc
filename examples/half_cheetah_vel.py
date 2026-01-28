@@ -18,6 +18,7 @@ os.environ['XLA_FLAGS'] = (
 
 os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
+
 SCENE_PATH = "examples/half_cheetah/half_cheetah.xml"
 
 
@@ -32,8 +33,8 @@ class Objective(BaseObjective):
         posture_height_cost = ((com_pos[1]-reference[1])**2).sum()
         posture_pitch_cost = ((com_pos[2]-reference[2])**2).sum()
         posture_cost = posture_height_cost + posture_pitch_cost
-        vel_cost = 10*((state[9]-reference[0])**2).sum()  # desired forward velocity
-        return posture_cost + vel_cost + 0.01*inputs.transpose() @ inputs
+        vel_cost = ((state[9]-reference[0])**2).sum()  # desired forward velocity
+        return posture_cost + 20.0*vel_cost + 0.01*inputs.transpose() @ inputs
 
     def final_cost(self, state, reference):
         com_pos = state[0:3]
@@ -41,11 +42,13 @@ class Objective(BaseObjective):
         posture_pitch_cost = ((com_pos[2]-reference[2])**2).sum()
         posture_cost = posture_height_cost + posture_pitch_cost
         vel_cost = ((state[9]-reference[0])**2).sum()  # desired forward velocity
-        return 100*(posture_cost + vel_cost)
+        total_cost = 10.0*(0.1*posture_cost + vel_cost)
+        return total_cost
 
 
 def post_update(sim):
     print(f"Current COM position: {sim.current_state_vec()[0:2]}")
+    print(f"Current COM x velocity: {sim.current_state_vec()[9]}")
 
 
 if __name__ == "__main__":
@@ -66,21 +69,19 @@ if __name__ == "__main__":
     config = Config(robot_config)
     config.general.visualize = False
     config.MPC.dt = 0.02
-    config.MPC.horizon = 30
-    config.MPC.std_dev_mppi = 0.2*jnp.ones(robot_config.nu)
-    config.MPC.num_parallel_computations = 1500
-    config.MPC.lambda_mpc = 100.0
-    #config.MPC.smoothing = "Spline"
-    #config.MPC.num_control_points = 5
+    config.MPC.horizon = 10
+    config.MPC.std_dev_mppi = 0.5*jnp.ones(robot_config.nu)
+    config.MPC.num_parallel_computations = 500
+    config.MPC.lambda_mpc = 5.0
     config.MPC.num_control_points = config.MPC.horizon
     config.MPC.gains = True
 
     config.solver_dynamics = DynamicsModel.MJX
     config.sim_dynamics = DynamicsModel.MJX
 
-    config.sim_iterations = 500
+    config.sim_iterations = 300
 
-    config.sim.dt = 0.005
+    config.sim.dt = 0.002
 
     # Reference for the end-effector position
     final_com_pos = jnp.array([0.8, 0., 0.], dtype=jnp.float32)
@@ -103,6 +104,12 @@ if __name__ == "__main__":
     plt.plot(time_vect, sim.state_traj[:, 9])
     plt.legend(["v_x"])
     plt.grid()
+    plt.show()
+
+    plt.plot(sim.state_traj[:, 0], sim.state_traj[:, 1])
+    plt.legend(["x z"])
+    plt.grid()
+    plt.gca().axis('equal')
     plt.show()
 
     plt.show()

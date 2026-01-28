@@ -60,7 +60,7 @@ if __name__ == "__main__":
     robot_config.q_init = jnp.array(q0)
 
     config = Config(robot_config)
-    config.general.visualize = True
+    config.general.visualize = False
     config.MPC.dt = 0.02
     config.MPC.horizon = 50
     config.MPC.std_dev_mppi = 10*jnp.ones(robot_config.nu)
@@ -96,11 +96,15 @@ if __name__ == "__main__":
 
     sim.simulate()
 
-    import matplotlib.pyplot as plt
-    time_vect = config.MPC.dt*jnp.arange(sim.state_traj.shape[0])
-    plt.plot(time_vect, sim.state_traj[:, 0])
-    plt.legend(["v_x"])
-    plt.grid()
-    plt.show()
+    print("mean height" + str(jnp.mean(sim.state_traj[:, 1])))
 
-    plt.show()
+    jnp.save("nogains", jnp.array(sim.state_traj))
+
+    # import matplotlib.pyplot as plt
+    # time_vect = config.MPC.dt*jnp.arange(sim.state_traj.shape[0])
+    # plt.plot(time_vect, sim.state_traj[:, 0])
+    # plt.legend(["v_x"])
+    # plt.grid()
+    # plt.show()
+
+    # plt.show()

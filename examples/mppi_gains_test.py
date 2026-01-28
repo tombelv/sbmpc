@@ -8,50 +8,65 @@ import control
 
 import jax.numpy as jnp
 
-import matplotlib.pyplot as plt
-
 from sbmpc import BaseObjective
 import sbmpc.settings as settings
 from sbmpc.simulation import build_model_and_solver
 
 
-# Simple double integrator model
-A = jnp.array([[0, 1], [0, 0]])
+# Number of tests to run
+N_tests = 50
+
+# Whether to use linearized dynamics or not in the mppi
+LINEAR = False
+# Whether to saturate the inputs for the mppi
+INPUT_SATURATION = True
+
+# Integration time step
+DT = 0.05
+
+MPPI_HORIZON = 25
+
+# linearized dynamics of inverted pendulum
+A = jnp.array([[0, 1], [1, 0]])
 B = jnp.array([[0], [1]])
 
 Q = jnp.array([[1, 0], [0, 1]])
 R = Q[0, 0]
 
-Ad = jnp.eye(2, 2) + 0.05 * A
-Bd = 0.05*B
+Ad = jnp.eye(2, 2) + DT * A
+Bd = DT * B
 
 
 K, S, E = control.dlqr(Ad, Bd, Q, R)
-# Note that the feedback fains from the LQR are supposed to be applied like u = -K x
+# Note that the feedback fains from the LQR are supposed to be applied like u = - K x
 print("LQR gains: ", -K)
 
-x = jnp.array([0.0, 0.0])
-x_des = jnp.array([0.5, 0.0])
-optimal_inputs = jnp.zeros((25, 2))
-for i in range(25):
+# Compute intial guess
+x_init = jnp.array([jnp.pi/8, 0.0])
+x_des = jnp.array([0.0, 0.0])
+x = x_init.copy()
+optimal_inputs = jnp.zeros((MPPI_HORIZON, 1))
+for i in range(MPPI_HORIZON):
     u = -K @ (x - x_des)
     optimal_inputs = optimal_inputs.at[i, 0].set(u[0])
     x = Ad @ x + Bd @ u
 
+print("Optimal inputs: ", optimal_inputs.T)
 
-# Redefine B matrix since mppi does not support single input systems (to be fixed)
-B_mppi = jnp.array([[0, 0], [1, 0]])
-
-def dynamics(x, u, p):
-    return A @ x + B_mppi @ u
+if LINEAR:
+    def dynamics(x, u, p):
+        return A @ x + B @ u
+else:
+    def dynamics(x, u, p):
+        return jnp.array([x[1], jnp.sin(x[0]) + u[0]])
 
 
 class Objective(BaseObjective):
     def running_cost(self, state, inputs, reference):
-        return 20*((state - reference).T @ Q @ (state - reference))
+        return ((state - reference).T @ Q @ (state - reference)) / DT
 
     def final_cost(self, state, reference):
-        return 20*(state - reference).T @ S @ (state - reference)
+        return (state - reference).T @ S @ (state - reference) / DT
 
 
 if __name__ == "__main__":
@@ -60,7 +75,10 @@ if __name__ == "__main__":
 
     robot_config.nq = 1
     robot_config.nv = 1
-    robot_config.nu = 2
+    robot_config.nu = 1
+    if INPUT_SATURATION:
+        robot_config.input_min = jnp.array([-0.5], dtype=jnp.float32)
+        robot_config.input_max = jnp.array([0.5], dtype=jnp.float32)
 
     robot_config.q_init = jnp.array([0.], dtype=jnp.float32)  # hovering position
 
@@ -68,10 +86,10 @@ if __name__ == "__main__":
 
     config.integrator_type = "euler"
 
-    config.MPC.dt = 0.05
-    config.MPC.horizon = 25
-    config.MPC.std_dev_mppi = jnp.array([0.5, 0.0])
-    config.MPC.num_parallel_computations = 10000
+    config.MPC.dt = DT
+    config.MPC.horizon = MPPI_HORIZON
+    config.MPC.std_dev_mppi = jnp.array([0.5])
+    config.MPC.num_parallel_computations = 1000
     config.MPC.lambda_mpc = 2.0
     config.MPC.num_control_points = config.MPC.horizon
     config.MPC.gains = True
@@ -83,15 +101,28 @@ if __name__ == "__main__":
 
     model, solver = build_model_and_solver(config, objective, custom_dynamics_fn=dynamics)
 
+    print("Optimal LQR cost: ", objective.final_cost(x_init, x_des))
+
+    # perform a first dummy iteration to initialize the solver
     solver.sampler.optimal_samples = optimal_inputs
-
-    input = solver.command(jnp.array([0.0, 0.0]), jnp.array([0.5, 0.0]), False, num_steps=1).block_until_ready()
-
-    mppi_gains = solver.gains[0]
-
-    print("MPPI gains: ", mppi_gains)
+    input = solver.command(x_init, x_des, False, num_steps=1).block_until_ready()
 
 
-    print("error norm: ", jnp.linalg.norm(mppi_gains + K, jnp.inf))
+    error_norms = []
+    mppi_gains = []
 
+    for i in range(N_tests):
+        solver.sampler.optimal_samples = optimal_inputs
+        input = solver.command(x_init, x_des, False, num_steps=1).block_until_ready()
 
+        print(input.T)
+
+        mppi_gains.append(solver.gains[0])
+        print(f"Test {i+1}/{N_tests}, MPPI gains: {mppi_gains[-1]}")
+
+        error_norms.append(jnp.linalg.norm(mppi_gains + K, jnp.inf))
+
+    # jnp.save(f"mppi_gains_sat_hard{config.MPC.num_parallel_computations}", jnp.array(mppi_gains))
+
+    print("mean error norm: ", jnp.mean(jnp.array(error_norms)))
+    print("max error norm: ", jnp.max(jnp.array(error_norms)))

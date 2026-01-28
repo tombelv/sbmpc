@@ -196,6 +196,18 @@ class ModelMjx(BaseModel):
         data_next = data_next.replace(qpos=state[:self.model.nq], qvel=state[self.model.nq:], ctrl=inputs)
         data_next = mjx.step(self.model, data_next)
         return jnp.concatenate([data_next.qpos, data_next.qvel])
+    
+    def integrate_parametric(self, state: jnp.ndarray, inputs: jnp.array, params: jnp.ndarray, dt):
+        mass = params[0]
+        inertia = params[1]
+        data_next = self.data
+        data_next = data_next.replace(qpos=state[:self.model.nq], qvel=state[self.model.nq:], ctrl=inputs)
+        # jax.debug.callback(lambda mass, inertia: print("Mass:", mass, "Inertia:", inertia), self.model.body_mass, self.model.body_inertia)
+        model = self.model.replace(body_mass=jnp.array([0, mass]), body_inertia=jnp.array([jnp.zeros(3), inertia]))
+        data_next = mjx.step(model, data_next)
+
+        jax.debug.print("after step mass: {mass}, inertia: {inertia}", mass=model.body_mass, inertia=model.body_subtreemass)
+        return jnp.concatenate([data_next.qpos, data_next.qvel])
 
     def _integrate_kinematic(self, state: jnp.ndarray, inputs: jnp.array, dt: float):
         return state + dt * inputs
