@@ -3,7 +3,7 @@ A generic sampling-based MPC python library based on Jax.
 
 Implements the Feedback-MPPI method presented in the [related paper](https://arxiv.org/abs/2506.14855) to compute a first order approximation of the MPPI solution suitable for high-frequency state feedback corrections.
 ```bibtex
-@article{belvedere2025feedbackmppi,
+@article{belvedere2026feedbackmppi,
       author={Belvedere, Tommaso and Ziegltrum, Michael and Turrisi, Giulio and Modugno, Valerio},
       title={Feedback-MPPI: Fast Sampling-Based MPC via Rollout Differentiation – Adios low-level controllers},
       journal={IEEE Robotics and Automation Letters},  
