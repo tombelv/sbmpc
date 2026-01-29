@@ -18,36 +18,48 @@ Implements the Feedback-MPPI method presented in the [related paper](https://arx
 
 # Installation
 ## Requirements
- - [Nvidia cuda toolkit](https://developer.nvidia.com/cuda-toolkit) installed system-wide (if you want to use a local CUDA version)
- - [miniforge](https://github.com/conda-forge/miniforge/releases)
+ - [pixi](https://pixi.sh/) - A fast package manager built on top of conda
 
 ## Instructions
-Create the conda environment with
-```
-mamba env create -f environment.yml
+
+### CPU-only installation (default)
+Install dependencies and activate the CPU-only environment:
+```bash
+pixi install
+pixi shell
 ```
 
-Activate the environment with
-```
-conda activate sbmpc
-```
-
-Depending on the CUDA settings of your machine, choose between
-- CPU-only acceleration
-```
-pip install -e .
-```
-- GPU acceleration with pip-installed CUDA libraries
-```
-pip install -e ".[cuda12]"
-```
-- GPU acceleration with locally installed CUDA
-```
-pip install -e ".[cuda12_local]"
+### CUDA-enabled installation
+For GPU acceleration with CUDA support:
+```bash
+pixi install -e cuda
+pixi shell -e cuda
 ```
 
-Refer to the Jax documentation for details.
 
+### Running examples
+Run examples directly with pixi:
+```bash
+pixi run python examples/quadrotor.py
+```
+
+Or with the CUDA environment:
+```bash
+pixi run -e cuda python examples/quadrotor.py
+```
+
+Refer to the [Jax documentation](https://jax.readthedocs.io/) for more details on GPU acceleration.
+
+### Building the package
+To build the Python package:
+```bash
+pixi run build
+```
+
+Or with a specific environment:
+```bash
+pixi run -e cuda build
+```
 
 ## Contributors
 

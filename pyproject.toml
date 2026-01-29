@@ -4,13 +4,22 @@ authors = [
   { name="Tommaso Belvedere", email="tommaso.belvedere@irisa.fr" },
   { name="Giulio Turrisi", email="giulio.turrisi@iit.it" },
   { name="Valerio Modugno", email="v.modugno@ucl.ac.uk" },
-  { name="Chidinma Ezeji", email="" },
+  { name="Chidinma Ezeji"},
   { name="Michael Ziegltrum", email="mzandtheraspberrypi@gmail.com" },
 ]
-dynamic = ["version", "dependencies"]
+dynamic = ["version"]
 description = "A package to do sampling based trajectory control for robotic applications."
+dependencies = [
+    "numpy",
+    "matplotlib",
+    "jax>=0.8.0",
+    "control",
+    "mujoco-mjx",
+    "interpax",
+    "equinox>=0.13.4"
+    ]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = "<3.13"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
@@ -22,8 +31,13 @@ license-files = ["LICEN[CS]E*"]
 Homepage = "https://github.com/tombelv/sbmpc"
 Issues = "https://github.com/tombelv/sbmpc/issues"
 
+[project.optional-dependencies]
+cuda12 = [
+    "jax[cuda12] ; platform_system == 'Linux'"
+]
+
 [build-system]
-requires = ["hatchling", "hatch-vcs", "hatch-requirements-txt"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
@@ -32,9 +46,30 @@ source = "vcs"
 [tool.hatch.version.raw-options]
 version_scheme = "no-guess-dev"
 
-[tool.hatch.metadata.hooks.requirements_txt]
-files = ["requirements.txt"]
+# Pixi configuration
+[tool.pixi.workspace]
+channels = ["conda-forge", "nvidia"]
+platforms = ["linux-64", "osx-arm64"]
 
-[project.optional-dependencies]
-cuda12_local = ["jax[cuda12_local]"]
-cuda12 = ["jax[cuda12]"]
+[tool.pixi.tasks]
+build = "hatch build"
+
+[tool.pixi.pypi-dependencies]
+sbmpc = { path = ".", editable = true }
+hatch-vcs = "*"
+hatch = "*"
+
+# CUDA feature (Linux only)
+[tool.pixi.feature.cuda]
+platforms = ["linux-64"]
+
+[tool.pixi.feature.cuda.dependencies]
+cuda-nvcc = "*"
+
+[tool.pixi.feature.cuda.pypi-dependencies]
+jaxlib = "*"
+jax = { version = ">=0.8.0", extras = ["cuda12"] }
+
+[tool.pixi.environments]
+default = { solve-group = "default" }
+cuda = ["cuda"]
