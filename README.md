@@ -70,3 +70,7 @@ pixi run -e cuda build
 - Valerio Modugno, UCL (core developer, project lead)
 
 
+## Related publications
+- T. Belvedere, M. Ziegltrum, G. Turrisi, and V. Modugno, “Feedback-MPPI: Fast Sampling-Based MPC via Rollout Differentiation – Adios Low-Level Controllers”, IEEE Robotics and Automation Letters, vol. 11, no. 1, pp. 1–8, 2026. DOI:10.1109/LRA.2025.3630871
+- O. Ezeji, M. Ziegltrum, G. Turrisi, T. Belvedere, and V. Modugno, “BC-MPPI: A Probabilistic Constraint Layer for Safe Model-Predictive Path-Integral Control”, Agents and Robots for Reliable Engineered Autonomy, Springer, pp. 131–143, 2025. DOI:10.1007/978-3-032-08049-3_8
+
