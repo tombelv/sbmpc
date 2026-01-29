@@ -36,16 +36,6 @@ pixi install -e cuda
 pixi shell -e cuda
 ```
 
-### Building the package
-To build the Python package:
-```bash
-pixi run build
-```
-
-Or with a specific environment:
-```bash
-pixi run -e cuda build
-```
 
 ### Running examples
 Run examples directly with pixi:
@@ -60,6 +50,16 @@ pixi run -e cuda python examples/quadrotor.py
 
 Refer to the [Jax documentation](https://jax.readthedocs.io/) for more details on GPU acceleration.
 
+### Building the package
+To build the Python package:
+```bash
+pixi run build
+```
+
+Or with a specific environment:
+```bash
+pixi run -e cuda build
+```
 
 ## Contributors
 
