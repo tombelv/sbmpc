@@ -141,16 +141,16 @@ class Model(ModelParametric):
 
 
 class ModelMjx(BaseModel):
-    def __init__(self, model_path, kinematic=False, input_bounds=(-jnp.inf, jnp.inf)):
+    def __init__(self, model_path, kinematic, input_bounds=(-jnp.inf, jnp.inf)):
         self.model_path = model_path
         self.kinematic = kinematic
         # Load the MuJoCo model
         self.mj_model = mujoco.MjModel.from_xml_path(filename=self.model_path)
 
-        if kinematic and jnp.array_equal(input_bounds, (-jnp.inf, jnp.inf)):
+        if self.kinematic and jnp.array_equal(input_bounds, (-jnp.inf, jnp.inf)):
             input_bounds = [-jnp.inf * jnp.ones(self.mj_model.nu, dtype=jnp.float32),
                              jnp.inf * jnp.ones(self.mj_model.nu, dtype=jnp.float32)]
-        elif not kinematic:
+        elif not self.kinematic:
             input_bounds = (self.mj_model.actuator_ctrlrange[:, 0], self.mj_model.actuator_ctrlrange[:, 1])
         else:
             input_bounds = [input_bounds[0], input_bounds[1]]
@@ -162,7 +162,7 @@ class ModelMjx(BaseModel):
         self.data = mjx.put_data(self.mj_model, self.mj_data)  # initial state on the gpu
 
         # If the model is set as kinematic, it follows the dynamics $\dot q = u$
-        if kinematic:
+        if self.kinematic:
             integrate_vect = jax.vmap(self._integrate_kinematic, in_axes=(0, 0, None))
             self.integrate_rollout = jax.jit(integrate_vect)
             self.integrate = jax.jit(self._integrate_kinematic)
@@ -172,15 +172,24 @@ class ModelMjx(BaseModel):
             integrate_vect = jax.vmap(self._integrate, in_axes=(0, 0, None))
             self.integrate_rollout = jax.jit(integrate_vect)
             self.integrate = jax.jit(self._integrate_mjx)
-            self.integrate_sim = jax.jit(self._integrate_mjx)
+            self.integrate_sim = self._integrate_mujoco
             self.integrate_rollout_single = self._integrate
 
 
     # here we need to work on data that is already on the gpu
     def _integrate_mjx(self, state: mjx.Data, inputs: jnp.array, dt: float):
+        model = self.model.replace(opt=self.model.opt.replace(timestep=dt))
         state_next = state.replace(ctrl=inputs)
-        state_next = mjx.step(self.model, state_next)
+        state_next = mjx.step(model, state_next)
         return state_next
+
+    def _integrate_mujoco(self, state: mujoco.MjData, inputs: jnp.array, dt: float):
+        self.mj_model.opt.timestep = dt
+        self.mj_data.qpos = state.qpos
+        self.mj_data.qvel = state.qvel
+        self.mj_data.ctrl = inputs
+        mujoco.mj_step(self.mj_model, self.mj_data)
+        return self.mj_data
 
     def _integrate(self, state: jnp.ndarray, inputs: jnp.array, dt: float):
         data_next = self.data
@@ -190,13 +199,13 @@ class ModelMjx(BaseModel):
 
     def _integrate_kinematic(self, state: jnp.ndarray, inputs: jnp.array, dt: float):
         return state + dt * inputs
-    
+
     def _integrate_kinematic_mjx(self, state: jnp.ndarray, inputs: jnp.array, dt: float):
         qpos = state.qpos
         qpos_next = qpos + dt * inputs
         state_next = self.data
         state_next = state_next.replace(qpos=qpos_next)
-        return state_next 
+        return state_next
 
     def set_qpos(self, qpos):
         self.data = self.data.replace(qpos=qpos)

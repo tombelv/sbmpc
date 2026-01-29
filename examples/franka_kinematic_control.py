@@ -63,6 +63,8 @@ if __name__ == "__main__":
     robot_config.q_init = jnp.array(q0)
 
     config = Config(robot_config)
+    config.sim.dt = 0.02
+    
     config.general.visualize = True
     config.MPC.dt = 0.02
     config.MPC.horizon = 50

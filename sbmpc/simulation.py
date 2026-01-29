@@ -20,10 +20,10 @@ from  sbmpc.gains import  Gains,MPPIGain
 class Visualizer(ABC):
     def __init__(self):
         self.paused = False
-        
+
     def toggle_paused(self):
         self.paused != self.paused
-    
+
     def get_paused(self):
         return self.paused
 
@@ -105,7 +105,7 @@ class MujocoVisualizer(Visualizer):
 
     def set_qpos(self, qpos) -> None:
         if self.step_mujoco:
-            self.mj_data.qpos = qpos    
+            self.mj_data.qpos = qpos
             mujoco.mj_fwdPosition(self.mj_model, self.mj_data)
         self.viewer.sync()
 
@@ -113,7 +113,7 @@ class MujocoVisualizer(Visualizer):
         n = self.obsl.n_obstacles
         obs_pos = self.obstacle_ref[iter-1]
         obs_pos = np.reshape(obs_pos, (n,3))
-        for i in range(1,n+1): 
+        for i in range(1,n+1):
             self.mj_model.body_pos[i] = obs_pos[i-1]
 
 def construct_mj_visualizer_from_model(model: BaseModel, config: settings.Config):
@@ -124,11 +124,11 @@ def construct_mj_visualizer_from_model(model: BaseModel, config: settings.Config
         mj_model = model.mj_model
         mj_data = model.mj_data
     else:
-        new_system = ModelMjx(config.robot.robot_scene_path)
+        new_system = ModelMjx(config.robot.robot_scene_path, config.robot.mjx_kinematic)
         mj_model = new_system.mj_model
         mj_data = new_system.mj_data
 
-    visualizer = MujocoVisualizer(mj_model, mj_data, step_mujoco=step_mujoco, num_iters=config.sim_iterations) 
+    visualizer = MujocoVisualizer(mj_model, mj_data, step_mujoco=step_mujoco, num_iters=config.sim_iterations)
     return visualizer
 
 
@@ -142,9 +142,11 @@ class Simulator(ABC):
         self.num_iter = config.sim_iterations
         self.obstacles = obstacles
 
+        self.dt = config.sim.dt
+
         if isinstance(initial_state, (np.ndarray, jnp.ndarray)):
             self.current_state_vec = lambda: self.current_state
-        elif isinstance(initial_state, mjx.Data):
+        elif isinstance(initial_state, (mjx.Data, mujoco.MjData)):
             if model.kinematic:
                 self.current_state_vec = lambda: jnp.array(self.current_state.qpos)
             else:
@@ -186,11 +188,11 @@ class Simulator(ABC):
 
                         self.visualizer.set_qpos(self.current_state_vec()[
                             :self.model.get_nq()])
-                        
+
                         if self.obstacles:
                             self.visualizer.move_obstacles(self.iter)
 
-                        time_until_next_step = self.rollout_gen.dt - \
+                        time_until_next_step = self.dt - \
                             (time.time() - step_start)
                         if time_until_next_step > 0:
                             time.sleep(time_until_next_step)
@@ -236,7 +238,7 @@ class Simulation(Simulator):
         self.input_traj[self.iter, :] = ctrl
 
         # Simulate the dynamics
-        self.current_state = self.model.integrate_sim(self.current_state, ctrl, self.rollout_gen.dt)
+        self.current_state = self.model.integrate_sim(self.current_state, ctrl, self.dt)
         self.state_traj[self.iter + 1,  :] = self.current_state_vec() #[:self.model.nx] # set only qpos and qvel
 
 
@@ -249,7 +251,7 @@ def build_custom_model(custom_dynamics_fn: Callable, nq: int, nv: int, nu: int, 
 
 
 def build_mjx_model(config) -> Tuple[BaseModel, jnp.array, jnp.array]:
-    system = ModelMjx(config.robot.robot_scene_path, kinematic=config.robot.mjx_kinematic)
+    system = ModelMjx(config.robot.robot_scene_path, config.robot.mjx_kinematic)
     system.set_qpos(config.robot.q_init)
     q_init = system.data.qpos
     if not config.robot.mjx_kinematic:
@@ -288,7 +290,7 @@ def build_model_and_solver(config: settings.Config, objective: BaseObjective, cu
 
 def build_all(config: settings.Config, objective: BaseObjective,
               reference: jnp.array,
-              custom_dynamics_fn: Optional[Callable] = None, 
+              custom_dynamics_fn: Optional[Callable] = None,
               obstacles: bool = True):
     system, x_init, state_init = (None, None, None)
     solver_dynamics_model_setting = config.solver_dynamics
@@ -318,9 +320,8 @@ def build_all(config: settings.Config, objective: BaseObjective,
     # Setup and run the simulation
     num_iterations = config.sim_iterations
     sim = Simulation(sim_state_init, sim_dynamics_model, rollout_generator, sampler, gains, reference, config, visualizer_params, obstacles)
-    
+
     # dummy for jitting
     input_sequence = sim.controller.command(solver_x_init, reference, False).block_until_ready()
-    
-    return sim
 
+    return sim

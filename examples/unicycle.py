@@ -45,6 +45,8 @@ if __name__ == "__main__":
 
     config = Config(robot_config)
 
+    config.sim.dt = 0.02
+
     config.MPC.dt = 0.02
     config.MPC.horizon = 100
 
