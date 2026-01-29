@@ -133,7 +133,7 @@ if __name__ == "__main__":
     config.solver_dynamics = settings.DynamicsModel.CUSTOM
     config.sim_dynamics = settings.DynamicsModel.CUSTOM
 
-    config.sim_iterations = 20 # number of simulation iterations
+    config.sim_iterations = 200 # number of simulation iterations
 
     q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
     x_des = jnp.concatenate([q_des, jnp.zeros(robot_config.nv, dtype=jnp.float32)], axis=0)
