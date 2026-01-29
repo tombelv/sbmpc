@@ -133,7 +133,6 @@ venv.bak/
 
 # Pixi
 .pixi/
-pixi.lock
 
 # Spyder project settings
 .spyderproject
