@@ -2,16 +2,16 @@
 from abc import ABC, abstractmethod
 import jax
 import jax.numpy as jnp
-from sbmpc.settings import Config
+from sbmpc.config import ControllerConfig
 
 from functools import partial
 
 class Gains(ABC):
 
-    def __init__(self, config: Config) -> None:
-        self.compute_gains = config.MPC.gains
-        self.lam = config.MPC.lambda_mpc
-        self.cur_gains =  jnp.zeros((config.robot.nu, config.robot.nx))
+    def __init__(self, controller_config: ControllerConfig, model) -> None:
+        self.compute_gains = controller_config.use_gains
+        self.lam = controller_config.lambda_inv
+        self.cur_gains =  jnp.zeros((model.nu, model.nx))  # Get dimensions from model
         
 
     @abstractmethod
@@ -20,8 +20,8 @@ class Gains(ABC):
 
 
 class MPPIGain(Gains):
-    def __init__(self, config: Config) -> None:
-        super().__init__(config)
+    def __init__(self, controller_config: ControllerConfig, model) -> None:
+        super().__init__(controller_config, model)
 
     @partial(jax.jit, static_argnums=(0,))
     def gains_computation(self, costs, samples_delta, gradients) -> jnp.ndarray:

@@ -1,5 +1,5 @@
 from sbmpc.model import BaseModel
-from sbmpc.settings import Config
+from sbmpc.config import ControllerConfig, ModelConfig
 from sbmpc.sampler import Sampler
 from sbmpc.gains import Gains
 
@@ -45,7 +45,7 @@ class BaseObjective(ABC):
 
 class RolloutGenerator():
 
-    def __init__(self, model: BaseModel, objective: BaseObjective, config: Config):
+    def __init__(self, model: BaseModel, objective: BaseObjective, config: ControllerConfig):
         """
         Initializes the rollout generator with the model, the objective, configurations and initial guess.
         Parameters
@@ -54,12 +54,12 @@ class RolloutGenerator():
             The model propagated during rollouts.
         objective: BaseObjective
             Required to compute the cost function in the rollout.
-        config_mpc: ConfigMPC
+        config: ControllerConfig
             Contains the MPC related parameters such as the time horizon, number of samples, etc.
         """
 
-        self.dtype_general = config.general.dtype
-        self.device = config.general.device
+        self.dtype_general = config.dtype
+        self.device = config.device
 
         self.model = model
         self.objective = objective
@@ -67,19 +67,23 @@ class RolloutGenerator():
         self.config = config
 
         # Sampling time for discrete time model
-        self.dt = config.MPC.dt
+        self.dt = config.dt
         # Control horizon of the MPC (steps)
-        self.horizon = config.MPC.horizon
+        self.horizon = config.horizon
         # Monte-carlo samples, that is the number of trajectories that are evaluated in parallel 
         # check if we need to move it
-        self.num_parallel_computations = config.MPC.num_parallel_computations
+        self.num_parallel_computations = config.num_samples
 
-        self.compute_gains = config.MPC.gains
+        self.compute_gains = config.use_gains
         
         # Covariance of the input action
-        # self.sigma_mppi = jnp.diag(config.MPC.std_dev_mppi**2)
+        # self.sigma_mppi = jnp.diag(config.std_dev_mppi**2)
   
-        self.num_control_points = config.MPC.num_control_points
+        # When not using spline smoothing, num_control_points must equal horizon
+        if config.smoothing == "Spline":
+            self.num_control_points = config.num_control_points
+        else:
+            self.num_control_points = self.horizon
         self.control_points_sparsity = self.horizon // self.num_control_points
 
         self.input_max_full_horizon = jnp.tile(model.input_max, (self.horizon, 1))
@@ -108,16 +112,16 @@ class RolloutGenerator():
 
     @partial(jax.vmap, in_axes=(None, None, None, 0), out_axes=(0, 0))
     def rollout_all(self, initial_state, reference, control_variables):
-        if self.config.MPC.sensitivity:
+        if self.config.use_sensitivity:
             return self.rollout_single_with_sensitivity(initial_state, reference, control_variables)
         else:
             return self.rollout_single(initial_state, reference, control_variables)
     
     def interpolate_control(self, control_variables):
         """"
-        Interpolates the control variables over the full horizon or passes the control variables directly
+        Interpolates the control variables over the full horizon or passes them directly.
         """
-        if self.config.MPC.smoothing == "Spline":
+        if self.config.smoothing == "Spline":
             control_interp = cubic_spline(self.control_spline_grid, control_variables, jnp.arange(0, self.horizon))
             return self.clip_input_single(control_interp)
         else:
@@ -202,7 +206,7 @@ class RolloutGenerator():
     def do_rollout(self, state, reference, optimal_samples, samples_delta, gains):
         gradients = None
 
-        if self.config.MPC.smoothing == "Spline":
+        if self.config.smoothing == "Spline":
             control_vars_all = optimal_samples[self.control_spline_grid, :] + samples_delta
         else:
             control_vars_all = optimal_samples + samples_delta

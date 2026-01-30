@@ -1,18 +1,21 @@
 """
-In this script we compare the mppi gains obtained from out differentiation procedure with the ones of an optimal LQR
-controller.
-We use the same Linear dynamics and cost of the LQR.
+In this script we compare the MPPI gains obtained from our differentiation procedure
+with the ones of an optimal LQR controller.
+We use the same linear dynamics and cost of the LQR.
 """
 
 import control
-
+import jax
 import jax.numpy as jnp
 
-import matplotlib.pyplot as plt
-
-from sbmpc import BaseObjective
-import sbmpc.settings as settings
-from sbmpc.simulation import build_model_and_solver
+from sbmpc import (
+    BaseObjective,
+    ModelConfig,
+    ControllerConfig,
+    DynamicsModel,
+    create_model,
+    create_controller,
+)
 
 
 # Simple double integrator model
@@ -23,11 +26,10 @@ Q = jnp.array([[1, 0], [0, 1]])
 R = Q[0, 0]
 
 Ad = jnp.eye(2, 2) + 0.05 * A
-Bd = 0.05*B
+Bd = 0.05 * B
 
 
 K, S, E = control.dlqr(Ad, Bd, Q, R)
-# Note that the feedback fains from the LQR are supposed to be applied like u = -K x
 print("LQR gains: ", -K)
 
 x = jnp.array([0.0, 0.0])
@@ -39,7 +41,7 @@ for i in range(25):
     x = Ad @ x + Bd @ u
 
 
-# Redefine B matrix since mppi does not support single input systems (to be fixed)
+# Redefine B matrix since MPPI does not support single input systems (to be fixed)
 B_mppi = jnp.array([[0, 0], [1, 0]])
 
 def dynamics(x, u, p):
@@ -48,50 +50,47 @@ def dynamics(x, u, p):
 
 class Objective(BaseObjective):
     def running_cost(self, state, inputs, reference):
-        return 20*((state - reference).T @ Q @ (state - reference))
+        return 20 * ((state - reference).T @ Q @ (state - reference))
 
     def final_cost(self, state, reference):
-        return 20*(state - reference).T @ S @ (state - reference)
+        return 20 * (state - reference).T @ S @ (state - reference)
 
 
 if __name__ == "__main__":
+    model_config = ModelConfig(
+        dynamics_model=DynamicsModel.CUSTOM,
+        dynamics_fn=dynamics,
+        nq=1,
+        nv=1,
+        nu=2,
+        q_init=jnp.array([0.], dtype=jnp.float32),
+        integrator_type="euler",
+    )
 
-    robot_config = settings.RobotConfig()
-
-    robot_config.nq = 1
-    robot_config.nv = 1
-    robot_config.nu = 2
-
-    robot_config.q_init = jnp.array([0.], dtype=jnp.float32)  # hovering position
-
-    config = settings.Config(robot_config)
-
-    config.integrator_type = "euler"
-
-    config.MPC.dt = 0.05
-    config.MPC.horizon = 25
-    config.MPC.std_dev_mppi = jnp.array([0.5, 0.0])
-    config.MPC.num_parallel_computations = 10000
-    config.MPC.lambda_mpc = 2.0
-    config.MPC.num_control_points = config.MPC.horizon
-    config.MPC.gains = True
-
-    config.solver_dynamics = settings.DynamicsModel.CUSTOM
-    config.sim_dynamics = settings.DynamicsModel.CUSTOM
+    controller_config = ControllerConfig(
+        dt=0.05,
+        horizon=25,
+        num_samples=10000,
+        lambda_inv=2.0,
+        std_dev=jnp.array([0.5, 0.0]),
+        smoothing=None,
+        num_control_points=25,
+        use_gains=True,
+        device=jax.devices()[0],
+        dtype=jnp.float32
+    )
 
     objective = Objective()
 
-    model, solver = build_model_and_solver(config, objective, custom_dynamics_fn=dynamics)
+    model, _ = create_model(model_config)
+    controller = create_controller(controller_config, model, objective)
 
-    solver.sampler.optimal_samples = optimal_inputs
+    controller.sampler.optimal_samples = optimal_inputs
 
-    input = solver.command(jnp.array([0.0, 0.0]), jnp.array([0.5, 0.0]), False, num_steps=1).block_until_ready()
+    _ = controller.compute_control(jnp.array([0.0, 0.0]), jnp.array([0.5, 0.0]), num_iterations=1)
 
-    mppi_gains = solver.gains[0]
+    mppi_gains = controller.gains[0]
 
     print("MPPI gains: ", mppi_gains)
-
-
-    print("error norm: ", jnp.linalg.norm(mppi_gains + K, jnp.inf))
 
 

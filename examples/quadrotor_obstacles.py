@@ -1,23 +1,24 @@
-import os
-
 import jax
 import jax.numpy as jnp
-
 import matplotlib.pyplot as plt
 
-from sbmpc import BaseObjective
-import sbmpc.settings as settings
-
-from sbmpc.simulation import build_all
+from sbmpc import (
+    BaseObjective,
+    ModelConfig,
+    ControllerConfig,
+    SimulationConfig,
+    DynamicsModel,
+    Reference,
+    create_model,
+    create_controller,
+    create_simulation,
+)
 from sbmpc.geometry import skew, quat_product, quat2rotm, quat_inverse
 from sbmpc.obstacle_loader import ObstacleLoader
-import mujoco
 
-os.environ['XLA_FLAGS'] = '--xla_gpu_triton_gemm_any=True'
-# Needed to remove warnings, to be investigated
 jax.config.update("jax_default_matmul_precision", "high")
 
-SCENE_PATH = "examples/bitcraze_crazyflie_2/scene.xml"
+SCENE_PATH = "examples/bitcraze_crazyflie_2/obstacles.xml"
 
 INPUT_MAX = jnp.array([1, 2.5, 2.5, 2])
 INPUT_MIN = jnp.array([0, -2.5, -2.5, -2])
@@ -115,71 +116,75 @@ class Objective(BaseObjective):
 if __name__ == "__main__":
     obsl = ObstacleLoader()
     obsl.create_obstacles()
-    obsl.load_obstacles()
+    # Note: obstacles.xml is used directly as scene_path, no need to load into scene.xml
 
-    robot_config = settings.RobotConfig()
+    model_config = ModelConfig(
+        dynamics_model=DynamicsModel.CUSTOM,
+        dynamics_fn=quadrotor_dynamics,
+        nq=7,
+        nv=6,
+        nu=4,
+        input_min=INPUT_MIN,
+        input_max=INPUT_MAX,
+        q_init=jnp.array([0., 0., 0., 1., 0., 0., 0.], dtype=jnp.float32),
+        integrator_type="rk4",
+        scene_path=SCENE_PATH,
+    )
 
-    robot_config.robot_scene_path = SCENE_PATH
-    robot_config.nq = 7
-    robot_config.nv = 6
-    robot_config.nu = 4
-    robot_config.input_min = INPUT_MIN
-    robot_config.input_max = INPUT_MAX
-    robot_config.q_init = jnp.array([0., 0., 0., 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
-    
-    config = settings.Config(robot_config)
+    controller_config = ControllerConfig(
+        dt=0.02,
+        horizon=25,
+        num_samples=2000,
+        lambda_inv=50.0,
+        std_dev=0.2*jnp.array([0.1, 0.1, 0.1, 0.05]),
+        initial_guess=INPUT_HOVER,
+        smoothing="Spline",
+        num_control_points=5,
+        use_gains=False,
+        device=jax.devices()[0],
+        dtype=jnp.float32
+    )
 
-    config.sim.dt = 0.02
-
-    config.general.visualize = True
-    config.MPC.dt = 0.02
-    config.MPC.horizon = 25
-    config.MPC.std_dev_mppi = 0.2*jnp.array([0.1, 0.1, 0.1, 0.05])
-    config.MPC.num_parallel_computations = 2000
-    config.MPC.initial_guess = INPUT_HOVER
-    config.MPC.lambda_mpc = 50.0
-    config.MPC.smoothing = "Spline"
-    config.MPC.num_control_points = 5
-    config.MPC.gains = False
-
-    config.solver_dynamics = settings.DynamicsModel.CUSTOM
-    config.sim_dynamics = settings.DynamicsModel.MJX
+    simulation_config = SimulationConfig(
+        dt=0.02,
+        num_iterations=200,
+        visualize=True,
+    )
 
     # x_init = jnp.concatenate([robot_config[settings.ROBOT_Q_INIT_KEY],
     #                  jnp.zeros(robot_config[settings.ROBOT_NV_KEY], dtype=jnp.float32)], axis=0)
     # reference = jnp.concatenate((x_init, INPUT_HOVER))
 
-    q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
-    x_des = jnp.concatenate([q_des, jnp.zeros(robot_config.nv, dtype=jnp.float32)], axis=0)
+    q_des = jnp.array([0.0, 1.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)
+    x_des = jnp.concatenate([q_des, jnp.zeros(model_config.nv, dtype=jnp.float32)], axis=0)
 
-    horizon = config.MPC.horizon+1
-    traj = obsl.get_obstacle_trajectory(config.sim_iterations,"circle")[:horizon] 
+    horizon = controller_config.horizon + 1
+    traj = obsl.get_obstacle_trajectory(simulation_config.num_iterations, "circle")[:horizon]
 
-    reference = jnp.concatenate((x_des, INPUT_HOVER))  
+    reference = jnp.concatenate((x_des, INPUT_HOVER))
     reference = jnp.tile(reference, (horizon, 1))
-    reference = jnp.concatenate([reference, traj],axis=1)
+    reference = jnp.concatenate([reference, traj], axis=1)
 
     objective = Objective()
 
-    sim = build_all(config, objective,
-                    reference,
-                    custom_dynamics_fn=quadrotor_dynamics)
+    model, _ = create_model(model_config)
+    controller = create_controller(controller_config, model, objective)
+    sim = create_simulation(model, controller, simulation_config, Reference(reference))
 
-    sim.simulate() 
+    sim.run()
 
     obsl.reset_xmls()
  
-    time_vect = config.MPC.dt*jnp.arange(sim.state_traj.shape[0])
+    states, controls = sim.get_trajectory()
+    time_vect = controller_config.dt * jnp.arange(states.shape[0])
     ax = plt.figure().add_subplot(projection='3d')
-    # Plot x-y-z position of the robot
-    ax.plot(sim.state_traj[:, 0], sim.state_traj[:, 1], sim.state_traj[:, 2])
+    ax.plot(states[:, 0], states[:, 1], states[:, 2])
     plt.show()
-    plt.plot(time_vect, sim.state_traj[:, 0:3])
+    plt.plot(time_vect, states[:, 0:3])
     plt.legend(["x", "y", "z"])
     plt.grid()
     plt.show()
-    # Plot the input trajectory
-    plt.plot(time_vect[:-1], sim.input_traj)
+    plt.plot(time_vect[:-1], controls)
     plt.legend(["F", "t_x", "t_y", "t_z"])
     plt.grid()
     plt.show()

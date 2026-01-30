@@ -1,19 +1,20 @@
-import os
-from time import sleep
-
 import jax
 import jax.numpy as jnp
-
 import matplotlib.pyplot as plt
 
-from sbmpc import BaseObjective
-import sbmpc.settings as settings
-
-from sbmpc.simulation import build_all
+from sbmpc import (
+    BaseObjective,
+    ModelConfig,
+    ControllerConfig,
+    SimulationConfig,
+    DynamicsModel,
+    Reference,
+    create_model,
+    create_controller,
+    create_simulation,
+)
 from sbmpc.geometry import skew, quat_product, quat2rotm, quat_inverse
 
-os.environ['XLA_FLAGS'] = '--xla_gpu_triton_gemm_any=True'
-# Needed to remove warnings, to be investigated
 jax.config.update("jax_default_matmul_precision", "high")
 
 SCENE_PATH = "examples/bitcraze_crazyflie_2/scene.xml"
@@ -31,50 +32,35 @@ SPATIAL_INTERTIA_MAT_INV = jnp.linalg.inv(SPATIAL_INTERTIA_MAT)
 
 INPUT_HOVER = jnp.array([MASS*GRAVITY, 0., 0., 0.], dtype=jnp.float32)
 
+
 @jax.jit
 def quadrotor_dynamics(state: jnp.array, inputs: jnp.array, params: jnp.array) -> jnp.array:
-    """
-    Simple quadrotor dynamics model with CoM placed at the geometric center
-
-    Parameters
-    ----------
-    state : jnp.array
-        state vector [pos (world frame),
-                      attitude (unit quaternion [w, x, y, z]),
-                      vel (world frame),
-                      angular_velocity (body frame)]
-    inputs : jnp.array):
-        input vector [thrust (along the body-frame z axis), torque (body frame)]
-    Returns
-    -------
-    state_dot :jnp.array
-        time derivative of state with given inputs
-    """
-
+    """Simple quadrotor dynamics model with CoM placed at the geometric center."""
     quat = state[3:7]
     ang_vel = state[10:13]
 
     orientation_mat = quat2rotm(quat)
     ang_vel_quat = jnp.array([0., state[10], state[11], state[12]])
 
-    total_force = jnp.array([0., 0., inputs[0]]) - MASS*GRAVITY*orientation_mat[2, :]  # transpose + 3rd col = 3rd row
-
-    total_torque = 1e-3*inputs[1:4] - skew(ang_vel) @ INERTIA_MAT @ ang_vel  # multiplication by normalization factor
+    total_force = jnp.array([0., 0., inputs[0]]) - MASS*GRAVITY*orientation_mat[2, :]
+    total_torque = 1e-3*inputs[1:4] - skew(ang_vel) @ INERTIA_MAT @ ang_vel
 
     acc = SPATIAL_INTERTIA_MAT_INV @ jnp.concatenate([total_force, total_torque])
 
-    state_dot = jnp.concatenate([state[7:10],
-                                 0.5 * quat_product(quat, ang_vel_quat),
-                                 orientation_mat @ acc[:3],
-                                 acc[3:6]])
+    state_dot = jnp.concatenate([
+        state[7:10],
+        0.5 * quat_product(quat, ang_vel_quat),
+        orientation_mat @ acc[:3],
+        acc[3:6]
+    ])
 
     return state_dot
 
 
 class Objective(BaseObjective):
-    """ Cost function for the Quadrotor regulation task"""
+    """Cost function for the quadrotor regulation task."""
 
-    def compute_state_error(self, state: jnp.ndarray, state_ref : jnp.ndarray):
+    def compute_state_error(self, state: jnp.ndarray, state_ref: jnp.ndarray):
         pos_err = state[0:3] - state_ref[0:3]
         att_err = quat_product(quat_inverse(state[3:7]), state_ref[3:7])[1:4]
         vel_err = state[7:10] - state_ref[7:10]
@@ -87,83 +73,87 @@ class Objective(BaseObjective):
         state_ref = state_ref.at[7:10].set(-1*(state[0:3] - state_ref[0:3]))
         input_ref = reference[13:13+4]
         pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, state_ref)
-        return (5 * vel_err.transpose() @ vel_err +
-                1 * ang_vel_err.transpose() @ ang_vel_err +
-                (inputs-input_ref).transpose() @ jnp.diag(jnp.array([10, 10, 10, 100])) @ (inputs-input_ref))
+        return (
+            5 * vel_err.transpose() @ vel_err +
+            1 * ang_vel_err.transpose() @ ang_vel_err +
+            (inputs-input_ref).transpose() @ jnp.diag(jnp.array([10, 10, 10, 100])) @ (inputs-input_ref)
+        )
 
     def final_cost(self, state, reference):
         pos_err, att_err, vel_err, ang_vel_err = self.compute_state_error(state, reference[:13])
-        return (10 * pos_err.transpose() @ pos_err +
-                1 * att_err.transpose() @ att_err +
-                5 * vel_err.transpose() @ vel_err +
-                1 * ang_vel_err.transpose() @ ang_vel_err)
-
-    # def constraints(self, state, inputs, reference):
-    #     return jnp.array([state[0] - 0.3, state[1] - 0.4])
-
-
-
+        return (
+            10 * pos_err.transpose() @ pos_err +
+            1 * att_err.transpose() @ att_err +
+            5 * vel_err.transpose() @ vel_err +
+            1 * ang_vel_err.transpose() @ ang_vel_err
+        )
 
 
 if __name__ == "__main__":
+    # 1. Model configuration (custom dynamics, MuJoCo scene for visualization)
+    model_config = ModelConfig(
+        dynamics_model=DynamicsModel.CUSTOM,
+        dynamics_fn=quadrotor_dynamics,
+        nq=7,
+        nv=6,
+        nu=4,
+        input_min=INPUT_MIN,
+        input_max=INPUT_MAX,
+        q_init=jnp.array([0., 0., 0.5, 1., 0., 0., 0.], dtype=jnp.float32),
+        integrator_type="si_euler",
+        scene_path=SCENE_PATH,
+    )
 
-    robot_config = settings.RobotConfig()
+    # 2. Controller configuration
+    controller_config = ControllerConfig(
+        dt=0.02,
+        horizon=25,
+        num_samples=1000,
+        lambda_inv=50.0,
+        std_dev=0.2*jnp.array([0.1, 0.1, 0.1, 0.05]),
+        initial_guess=INPUT_HOVER,
+        smoothing="Spline",
+        num_control_points=5,
+        use_gains=False,
+        device=jax.devices()[0],
+        dtype=jnp.float32
+    )
 
-    robot_config.robot_scene_path = SCENE_PATH
-    robot_config.nq = 7
-    robot_config.nv = 6
-    robot_config.nu = 4
-    robot_config.input_min = INPUT_MIN
-    robot_config.input_max = INPUT_MAX
-    robot_config.q_init = jnp.array([0., 0., 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
+    # 3. Simulation configuration
+    simulation_config = SimulationConfig(
+        dt=0.02,
+        num_iterations=250,
+        visualize=False,  # Uses scene_path from ModelConfig for visualization
+    )
 
-    config = settings.Config(robot_config)
-
-    config.sim.dt = 0.02
-
-    config.general.visualize = True
-    config.MPC.dt = 0.02
-    config.MPC.horizon = 25
-    config.MPC.std_dev_mppi = 0.2*jnp.array([0.1, 0.1, 0.1, 0.05])
-    config.MPC.num_parallel_computations = 1000
-    config.MPC.initial_guess = INPUT_HOVER
-    config.MPC.lambda_mpc = 50.0
-    config.MPC.smoothing = "Spline"
-    config.MPC.num_control_points = 5
-    config.MPC.gains = False
-
-    config.solver_dynamics = settings.DynamicsModel.CUSTOM
-    config.sim_dynamics = settings.DynamicsModel.CUSTOM
-
-    config.sim_iterations = 200 # number of simulation iterations
-
-    q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)  # hovering position
-    x_des = jnp.concatenate([q_des, jnp.zeros(robot_config.nv, dtype=jnp.float32)], axis=0)
-
-    reference = jnp.concatenate((x_des, INPUT_HOVER))
-
+    # 4. Define objective and reference
     objective = Objective()
 
-    sim = build_all(config, 
-                    objective,
-                    reference,
-                    custom_dynamics_fn=quadrotor_dynamics,
-                    obstacles=False)
+    q_des = jnp.array([0.5, 0.5, 0.5, 1., 0., 0., 0.], dtype=jnp.float32)
+    x_des = jnp.concatenate([q_des, jnp.zeros(model_config.nv, dtype=jnp.float32)], axis=0)
+    reference = Reference(jnp.concatenate((x_des, INPUT_HOVER)))
 
-    sim.simulate()
+    # 5. Create model, controller, and simulation
+    model, _ = create_model(model_config)
+    controller = create_controller(controller_config, model, objective)
+    sim = create_simulation(model, controller, simulation_config, reference)
 
-    # time_vect = config.MPC.dt*jnp.arange(sim.state_traj.shape[0])
-    # ax = plt.figure().add_subplot(projection='3d')
-    # # Plot x-y-z position of the robot
-    # ax.plot(sim.state_traj[:, 0], sim.state_traj[:, 1], sim.state_traj[:, 2])
-    # plt.show()
-    # plt.plot(time_vect, sim.state_traj[:, 0:3])
-    # plt.legend(["x", "y", "z"])
-    # plt.grid()
-    # plt.show()
-    # # Plot the input trajectory
-    # plt.plot(time_vect[:-1], sim.input_traj)
-    # plt.legend(["F", "t_x", "t_y", "t_z"])
-    # plt.grid()
+    print("Running simulation...")
+    sim.run()
 
-    # plt.show()
+    states, controls = sim.get_trajectory()
+    time_vect = controller_config.dt * jnp.arange(states.shape[0])
+
+    ax = plt.figure().add_subplot(projection='3d')
+    ax.plot(states[:, 0], states[:, 1], states[:, 2])
+    plt.show()
+
+    plt.plot(time_vect, states[:, 0:3])
+    plt.legend(["x", "y", "z"])
+    plt.grid()
+    plt.show()
+
+    plt.plot(time_vect[:-1], controls)
+    plt.legend(["F", "t_x", "t_y", "t_z"])
+    plt.grid()
+    plt.show()

@@ -2,27 +2,31 @@
 from abc import ABC, abstractmethod
 import jax
 import jax.numpy as jnp
-from sbmpc.settings import Config
+from sbmpc.config import ControllerConfig
 
 from functools import partial
 
 class Sampler(ABC):
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: ControllerConfig, model) -> None:
         # Initialize the vector storing the current optimal input sequence
-        self.horizon = config.MPC.horizon
-        self.num_control_points = config.MPC.num_control_points
-        self.model_nu = config.robot.nu
-        self.lam = config.MPC.lambda_mpc
-        self.std_dev = config.MPC.std_dev_mppi
+        self.horizon = config.horizon
+        # When not using spline smoothing, num_control_points must equal horizon
+        if config.smoothing == "Spline":
+            self.num_control_points = config.num_control_points
+        else:
+            self.num_control_points = self.horizon
+        self.model_nu = model.nu  # Get nu from actual model
+        self.lam = config.lambda_inv
+        self.std_dev = config.std_dev
         self.std_dev_horizon = jnp.tile(self.std_dev, self.num_control_points)
-        self.dtype_general = config.general.dtype
+        self.dtype_general = config.dtype
         # Monte-carlo samples, that is the number of trajectories that are evaluated in parallel
-        self.num_parallel_computations = config.MPC.num_parallel_computations
-        if config.MPC.initial_guess is None:
+        self.num_parallel_computations = config.num_samples
+        if config.initial_guess is None:
             self.optimal_samples = jnp.zeros((self.horizon, self.model_nu), dtype=self.dtype_general)
         else:
-            self.optimal_samples = jnp.tile(config.MPC.initial_guess, (self.horizon, 1))
+            self.optimal_samples = jnp.tile(config.initial_guess, (self.horizon, 1))
         # scaffolding for storing all the control actions on the prediction horizon for each rollout
         self.zero_random_deviations = jnp.zeros((self.num_parallel_computations, self.num_control_points, self.model_nu), dtype=self.dtype_general)
 
@@ -51,8 +55,8 @@ class Sampler(ABC):
 
 class CEMSampler(Sampler):
 
-    def __init__(self,config: Config) -> None:
-        super().__init__(config)
+    def __init__(self, config: ControllerConfig, model) -> None:
+        super().__init__(config, model)
 
     def sample_input_sequence(self, key) -> jnp.ndarray:
         # Return zero or your logic
@@ -66,8 +70,8 @@ class CEMSampler(Sampler):
 
 
 class MPPISampler(Sampler):
-    def __init__(self, config: Config) -> None:
-        super().__init__(config)
+    def __init__(self, config: ControllerConfig, model) -> None:
+        super().__init__(config, model)
         
     @partial(jax.jit, static_argnums=(0,))
     def sample_input_sequence(self, key) -> jnp.ndarray:

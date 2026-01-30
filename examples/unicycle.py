@@ -1,13 +1,18 @@
-import time
-
 import jax
 import jax.numpy as jnp
-
 import matplotlib.pyplot as plt
 
-from sbmpc import BaseObjective
-from sbmpc.settings import Config, DynamicsModel, RobotConfig
-from sbmpc.simulation import build_all
+from sbmpc import (
+    BaseObjective,
+    ModelConfig,
+    ControllerConfig,
+    SimulationConfig,
+    DynamicsModel,
+    Reference,
+    create_model,
+    create_controller,
+    create_simulation,
+)
 
 
 input_max = jnp.array([1, 1])
@@ -16,15 +21,16 @@ input_min = -input_max
 
 @jax.jit
 def unicycle_dynamics(state, inputs, params):
-    state_dot = jnp.array([inputs[0] * jnp.cos(state[2]),
-                           inputs[0] * jnp.sin(state[2]),
-                           inputs[1]], dtype=jnp.float32)
+    state_dot = jnp.array([
+        inputs[0] * jnp.cos(state[2]),
+        inputs[0] * jnp.sin(state[2]),
+        inputs[1]
+    ], dtype=jnp.float32)
     return state_dot
 
 
 class Objective(BaseObjective):
     def running_cost(self, state: jnp.array, inputs: jnp.array, reference: jnp.array) -> jnp.float32:
-        """ Cost function to regulate the state to the desired value"""
         error = state[:2] - reference[:2]
         return 1 * jnp.linalg.norm(error, ord=2) + jnp.linalg.norm(inputs, ord=2)
 
@@ -34,49 +40,51 @@ class Objective(BaseObjective):
 
 
 if __name__ == "__main__":
+    model_config = ModelConfig(
+        dynamics_model=DynamicsModel.CUSTOM,
+        dynamics_fn=unicycle_dynamics,
+        nq=3,
+        nv=0,
+        nu=2,
+        input_min=input_min,
+        input_max=input_max,
+        q_init=jnp.array([2, 2, 0], dtype=jnp.float32),
+        integrator_type="rk4",
+    )
 
-    robot_config = RobotConfig()
-    robot_config.nq = 3
-    robot_config.nv = 0
-    robot_config.nu = 2
-    robot_config.input_min = input_min
-    robot_config.input_max = input_max
-    robot_config.q_init = jnp.array([2, 2, 0], dtype=jnp.float32)
+    controller_config = ControllerConfig(
+        dt=0.02,
+        horizon=100,
+        num_samples=2000,
+        lambda_inv=5.0,
+        std_dev=jnp.array([0.1, 0.1]),
+        smoothing="Spline",
+        num_control_points=5,
+        use_gains=False,
+        device=jax.devices()[0],
+        dtype=jnp.float32
+    )
 
-    config = Config(robot_config)
-
-    config.sim.dt = 0.02
-
-    config.MPC.dt = 0.02
-    config.MPC.horizon = 100
-
-    config.MPC.std_dev_mppi = jnp.array([0.1, 0.1])
-    config.MPC.num_parallel_computations = 2000
-
-    config.MPC.lambda_mpc = 5.0
-
-    config.MPC.smoothing = "Spline"
-    config.MPC.num_control_points = 5
-
-    config.general.integrator_type = "rk4"
-
-    config.solver_dynamics = DynamicsModel.CUSTOM
-    config.sim_dynamics = DynamicsModel.CUSTOM
+    simulation_config = SimulationConfig(
+        dt=0.02,
+        num_iterations=300,
+        visualize=False,
+    )
 
     objective = Objective()
+    reference = Reference(jnp.array([0, 0, jnp.pi], dtype=jnp.float32))
 
-    reference = jnp.array([0, 0, jnp.pi], dtype=jnp.float32)
+    model, _ = create_model(model_config)
+    controller = create_controller(controller_config, model, objective)
+    sim = create_simulation(model, controller, simulation_config, reference)
+    sim.run()
 
-    sim = build_all(config, objective,
-                    reference,
-                    custom_dynamics_fn=unicycle_dynamics)
-    sim.simulate()
+    states, controls = sim.get_trajectory()
 
-    # Plot x-y position of the robot
-    plt.plot(sim.state_traj[:, 0], sim.state_traj[:, 1])
+    plt.plot(states[:, 0], states[:, 1])
     plt.scatter(0, 0, marker='x')
     plt.show()
-    # Plot the input trajectory
-    plt.plot(sim.input_traj)
+
+    plt.plot(controls)
     plt.grid()
     plt.show()
