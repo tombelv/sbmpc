@@ -66,7 +66,7 @@ if __name__ == "__main__":
     simulation_config = SimulationConfig(
         dt=0.02,
         num_iterations=1000,
-        visualize=False,
+        visualize=True,
     )
 
     ee_des = jnp.array([-0.5, -0.5, 0.3], dtype=jnp.float32)

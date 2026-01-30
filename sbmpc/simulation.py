@@ -12,6 +12,8 @@ import jax.numpy as jnp
 import mujoco
 import mujoco.mjx as mjx
 
+import mujoco.viewer
+
 from sbmpc.model import BaseModel, ModelMjx, create_model
 from sbmpc.controller import MPCController
 from sbmpc.config import SimulationConfig, ModelConfig, DynamicsModel
@@ -83,7 +85,7 @@ class SimulationRunner:
         controller: MPCController,
         initial_state,
         reference: Reference,
-        visualizer: Optional['Visualizer'] = None
+        visualizer: Optional[MujocoVisualizer] = None
     ):
         """Initialize simulation runner.
         
@@ -93,7 +95,7 @@ class SimulationRunner:
             controller: MPC controller
             initial_state: Initial state (array or MuJoCo data)
             reference: Reference object
-            visualizer: Optional visualizer
+            visualizer: Optional[MujocoVisualizer]
         """
         self.simulation_config = simulation_config
         self.model = model
